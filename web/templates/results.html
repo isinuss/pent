@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% set active_page = "results" %}
+{% block title %}Results{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>&#9776; Scan Results</h2>
+  <p class="desc">View and manage all scan results.</p>
+</div>
+
+<div id="results-list">
+  <div class="empty-state">
+    <div class="spinner"></div>
+    <p class="mt-12">Loading...</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', loadResults);
+
+const scanTypeLabels = {
+  recon: 'Recon', vuln_scan: 'Vuln Scan', web_test: 'Web Test',
+  js_analyze: 'JS Analysis', takeover: 'Takeover', checks: 'Checks', full_auto: 'Full Auto',
+};
+
+async function loadResults() {
+  try {
+    const resp = await fetch('/api/scans');
+    const scans = await resp.json();
+    const container = document.getElementById('results-list');
+
+    if (scans.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">&#128196;</div>
+          <p>No scan results yet.</p>
+          <a href="/scan" class="btn btn-primary">Run a Scan</a>
+        </div>`;
+      return;
+    }
+
+    let html = '<table class="data-table"><thead><tr>';
+    html += '<th>Status</th><th>Target</th><th>Type</th><th>Findings</th><th>Started</th><th>Actions</th>';
+    html += '</tr></thead><tbody>';
+
+    for (const scan of scans) {
+      html += `<tr>
+        <td><span class="status-dot ${scan.status}"></span><span class="badge badge-${scan.status}">${scan.status}</span></td>
+        <td class="text-mono">${escapeHtml(scan.target)}</td>
+        <td>${scanTypeLabels[scan.scan_type] || scan.scan_type}</td>
+        <td><strong>${scan.finding_count}</strong></td>
+        <td class="text-dim text-sm">${new Date(scan.created_at).toLocaleString()}</td>
+        <td class="flex gap-8">
+          <a href="/results/${scan.id}" class="btn btn-sm">Details</a>
+        </td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  } catch (e) {
+    document.getElementById('results-list').innerHTML =
+      '<div class="empty-state"><p>Error loading results.</p></div>';
+  }
+}
+</script>
+{% endblock %}

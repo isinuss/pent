@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% set active_page = "dashboard" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Dashboard</h2>
+  <p class="desc">Welcome to PENT. Start a new scan or review previous results.</p>
+</div>
+
+<div class="disclaimer-banner">
+  <span>&#9888;</span>
+  <span>This tool is for <strong>authorized security testing</strong> and <strong>bug bounty programs</strong> only. Always obtain written permission before testing any target.</span>
+</div>
+
+<!-- Quick Stats -->
+<div class="stats-grid" id="dashboard-stats">
+  <div class="stat-card total">
+    <div class="stat-value" id="stat-total">-</div>
+    <div class="stat-label">Total Scans</div>
+  </div>
+  <div class="stat-card" style="--stat-color: var(--accent)">
+    <div class="stat-value" style="color: var(--accent)" id="stat-running">-</div>
+    <div class="stat-label">Running</div>
+  </div>
+  <div class="stat-card critical">
+    <div class="stat-value" id="stat-findings">-</div>
+    <div class="stat-label">Total Findings</div>
+  </div>
+  <div class="stat-card completed">
+    <div class="stat-value" style="color: var(--green)" id="stat-completed">-</div>
+    <div class="stat-label">Completed</div>
+  </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="card">
+  <div class="card-title">Quick Actions</div>
+  <div class="flex gap-12" style="flex-wrap: wrap;">
+    <a href="/scan" class="btn btn-primary btn-lg">&#9889; New Scan</a>
+    <a href="/results" class="btn btn-lg">&#9776; View Results</a>
+    <a href="/guides" class="btn btn-lg">&#9782; Methodology Guides</a>
+  </div>
+</div>
+
+<!-- Recent Scans -->
+<div class="card mt-24">
+  <div class="card-title">Recent Scans</div>
+  <div id="recent-scans">
+    <div class="empty-state">
+      <div class="empty-icon">&#128269;</div>
+      <p>No scans yet. Start your first scan!</p>
+      <a href="/scan" class="btn btn-primary">Start Scanning</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  loadDashboard();
+  setInterval(loadDashboard, 5000);
+});
+
+async function loadDashboard() {
+  try {
+    const resp = await fetch('/api/scans');
+    const scans = await resp.json();
+
+    const total = scans.length;
+    const running = scans.filter(s => s.status === 'running').length;
+    const completed = scans.filter(s => s.status === 'completed').length;
+    const findings = scans.reduce((sum, s) => sum + (s.finding_count || 0), 0);
+
+    document.getElementById('stat-total').textContent = total;
+    document.getElementById('stat-running').textContent = running;
+    document.getElementById('stat-findings').textContent = findings;
+    document.getElementById('stat-completed').textContent = completed;
+
+    const container = document.getElementById('recent-scans');
+    if (scans.length === 0) return;
+
+    const scanTypeLabels = {
+      recon: 'Recon', vuln_scan: 'Vuln Scan', web_test: 'Web Test',
+      js_analyze: 'JS Analysis', takeover: 'Takeover', checks: 'Checks', full_auto: 'Full Auto',
+    };
+
+    let html = '<table class="data-table"><thead><tr>';
+    html += '<th>Status</th><th>Target</th><th>Type</th><th>Findings</th><th>Time</th><th>Actions</th>';
+    html += '</tr></thead><tbody>';
+
+    for (const scan of scans.slice(0, 10)) {
+      html += `<tr>
+        <td><span class="status-dot ${scan.status}"></span><span class="badge badge-${scan.status}">${scan.status}</span></td>
+        <td class="text-mono">${escapeHtml(scan.target)}</td>
+        <td>${scanTypeLabels[scan.scan_type] || scan.scan_type}</td>
+        <td>${scan.finding_count}</td>
+        <td class="text-dim text-sm">${new Date(scan.created_at).toLocaleString()}</td>
+        <td><a href="/results/${scan.id}" class="btn btn-sm">View</a></td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  } catch (e) {
+    console.error('Dashboard load error:', e);
+  }
+}
+</script>
+{% endblock %}

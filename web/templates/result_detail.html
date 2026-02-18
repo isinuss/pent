@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% set active_page = "results" %}
+{% block title %}Scan Details{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="flex-between">
+    <div>
+      <h2 id="detail-title">Scan Details</h2>
+      <p class="desc" id="detail-subtitle">Loading...</p>
+    </div>
+    <div class="flex gap-8">
+      <a href="/results" class="btn btn-sm">&#8592; Back</a>
+      <button class="btn btn-sm" onclick="downloadReport('html')">&#128196; HTML Report</button>
+      <button class="btn btn-sm" onclick="downloadReport('md')">&#128221; Markdown</button>
+      <button class="btn btn-sm" onclick="downloadReport('json')">&#128203; JSON</button>
+    </div>
+  </div>
+</div>
+
+<!-- Stats -->
+<div class="stats-grid" id="finding-stats">
+  <div class="stat-card critical"><div class="stat-value" id="cnt-critical">0</div><div class="stat-label">Critical</div></div>
+  <div class="stat-card high"><div class="stat-value" id="cnt-high">0</div><div class="stat-label">High</div></div>
+  <div class="stat-card medium"><div class="stat-value" id="cnt-medium">0</div><div class="stat-label">Medium</div></div>
+  <div class="stat-card low"><div class="stat-value" id="cnt-low">0</div><div class="stat-label">Low</div></div>
+  <div class="stat-card info"><div class="stat-value" id="cnt-info">0</div><div class="stat-label">Info</div></div>
+  <div class="stat-card total"><div class="stat-value" id="cnt-total">0</div><div class="stat-label">Total</div></div>
+</div>
+
+<!-- Filter -->
+<div class="card">
+  <div class="flex-between mb-12">
+    <div class="card-title">Findings</div>
+    <div class="flex gap-8">
+      <select class="form-select" id="filter-severity" onchange="renderFindings()" style="width:auto;">
+        <option value="all">All Severities</option>
+        <option value="critical">Critical</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+        <option value="info">Info</option>
+      </select>
+      <input type="text" class="form-input" id="filter-search" placeholder="Search findings..." style="width:250px;" oninput="renderFindings()">
+    </div>
+  </div>
+
+  <div id="findings-table">
+    <div class="empty-state"><div class="spinner"></div><p class="mt-12">Loading findings...</p></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const scanId = '{{ scan_id }}';
+let allFindings = [];
+
+document.addEventListener('DOMContentLoaded', loadDetail);
+
+async function loadDetail() {
+  try {
+    const resp = await fetch(`/api/scan/${scanId}`);
+    if (!resp.ok) { document.getElementById('detail-subtitle').textContent = 'Scan not found.'; return; }
+    const scan = await resp.json();
+
+    const typeLabels = {
+      recon: 'Reconnaissance', vuln_scan: 'Vulnerability Scan', web_test: 'Web App Test',
+      js_analyze: 'JS Analysis', takeover: 'Subdomain Takeover', checks: 'Security Checks', full_auto: 'Full Auto',
+    };
+
+    document.getElementById('detail-title').textContent = `${typeLabels[scan.scan_type] || scan.scan_type}: ${scan.target}`;
+    document.getElementById('detail-subtitle').innerHTML =
+      `<span class="badge badge-${scan.status}">${scan.status}</span> &mdash; Started: ${new Date(scan.created_at).toLocaleString()}`;
+
+    allFindings = scan.findings || [];
+    countFindings();
+    renderFindings();
+  } catch (e) {
+    document.getElementById('detail-subtitle').textContent = 'Error loading scan.';
+  }
+}
+
+function countFindings() {
+  const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+  for (const f of allFindings) {
+    const sev = (f.severity || 'info').toLowerCase();
+    if (sev in counts) counts[sev]++;
+    else counts.info++;
+  }
+  document.getElementById('cnt-critical').textContent = counts.critical;
+  document.getElementById('cnt-high').textContent = counts.high;
+  document.getElementById('cnt-medium').textContent = counts.medium;
+  document.getElementById('cnt-low').textContent = counts.low;
+  document.getElementById('cnt-info').textContent = counts.info;
+  document.getElementById('cnt-total').textContent = allFindings.length;
+}
+
+function renderFindings() {
+  const sevFilter = document.getElementById('filter-severity').value;
+  const searchFilter = document.getElementById('filter-search').value.toLowerCase();
+
+  let filtered = allFindings;
+  if (sevFilter !== 'all') filtered = filtered.filter(f => (f.severity || 'info').toLowerCase() === sevFilter);
+  if (searchFilter) {
+    filtered = filtered.filter(f => {
+      const str = JSON.stringify(f).toLowerCase();
+      return str.includes(searchFilter);
+    });
+  }
+
+  const container = document.getElementById('findings-table');
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>No findings match your filters.</p></div>';
+    return;
+  }
+
+  let html = '<table class="data-table"><thead><tr>';
+  html += '<th>#</th><th>Severity</th><th>Category</th><th>Title</th><th>Detail</th>';
+  html += '</tr></thead><tbody>';
+
+  filtered.forEach((f, i) => {
+    const sev = (f.severity || 'info').toLowerCase();
+    const cat = f.category || f.check_id || 'General';
+    const title = f.title || f.key || 'N/A';
+    const detail = f.detail || f.value || f.url || 'N/A';
+    html += `<tr>
+      <td class="text-dim">${i + 1}</td>
+      <td><span class="badge badge-${sev}">${sev}</span></td>
+      <td>${escapeHtml(cat)}</td>
+      <td><strong>${escapeHtml(title)}</strong></td>
+      <td class="text-sm text-secondary">${escapeHtml(String(detail).substring(0, 200))}</td>
+    </tr>`;
+  });
+
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+function downloadReport(fmt) {
+  window.open(`/api/scan/${scanId}/report/${fmt}`, '_blank');
+}
+</script>
+{% endblock %}

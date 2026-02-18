@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% set active_page = "guides" %}
+{% block title %}Guides{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>&#9782; Methodology Guides</h2>
+  <p class="desc">Checklists, methodologies, and references for your security testing workflow.</p>
+</div>
+
+<div class="guide-grid">
+  <a href="/guides/recon" class="guide-card">
+    <div class="guide-icon">&#128269;</div>
+    <div class="guide-title">Reconnaissance</div>
+    <div class="guide-desc">Passive and active recon checklist with tool recommendations</div>
+  </a>
+
+  <a href="/guides/web" class="guide-card">
+    <div class="guide-icon">&#127760;</div>
+    <div class="guide-title">OWASP Top 10</div>
+    <div class="guide-desc">Complete web app testing guide covering all OWASP Top 10 categories</div>
+  </a>
+
+  <a href="/guides/api" class="guide-card">
+    <div class="guide-icon">&#128268;</div>
+    <div class="guide-title">API Security</div>
+    <div class="guide-desc">REST and GraphQL API testing methodology and checklist</div>
+  </a>
+
+  <a href="/guides/bugbounty" class="guide-card">
+    <div class="guide-icon">&#128176;</div>
+    <div class="guide-title">Bug Bounty Workflow</div>
+    <div class="guide-desc">End-to-end bug bounty methodology from recon to reporting</div>
+  </a>
+
+  <a href="/guides/mobile" class="guide-card">
+    <div class="guide-icon">&#128241;</div>
+    <div class="guide-title">Mobile App Testing</div>
+    <div class="guide-desc">Android and iOS security testing with static and dynamic analysis</div>
+  </a>
+
+  <a href="/guides/network" class="guide-card">
+    <div class="guide-icon">&#128421;</div>
+    <div class="guide-title">Network Testing</div>
+    <div class="guide-desc">Network penetration testing checklist and service-specific tests</div>
+  </a>
+
+  <a href="/guides/report_writing" class="guide-card">
+    <div class="guide-icon">&#128221;</div>
+    <div class="guide-title">Report Writing</div>
+    <div class="guide-desc">How to write clear, professional security assessment reports</div>
+  </a>
+
+  <a href="/guides/google_dorks" class="guide-card">
+    <div class="guide-icon">&#128270;</div>
+    <div class="guide-title">Google Dorking</div>
+    <div class="guide-desc">Search operators and dork patterns for bug bounty recon</div>
+  </a>
+</div>
+{% endblock %}

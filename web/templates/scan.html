@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% set active_page = "scan" %}
+{% block title %}New Scan{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>&#9889; New Scan</h2>
+  <p class="desc">Select a scan type and enter your target to begin.</p>
+</div>
+
+<div class="disclaimer-banner">
+  <span>&#9888;</span>
+  <span>Only scan targets you have <strong>explicit authorization</strong> to test.</span>
+</div>
+
+<!-- Target Input -->
+<div class="card">
+  <div class="form-group">
+    <label>Target</label>
+    <input type="text" id="target-input" class="form-input" placeholder="example.com or https://example.com" autocomplete="off">
+  </div>
+</div>
+
+<!-- Scan Type Selection -->
+<div class="card">
+  <div class="card-title">Select Scan Type</div>
+  <div class="scan-types" id="scan-types">
+
+    <div class="scan-type-card" data-type="recon" onclick="selectScanType(this)">
+      <div class="scan-icon">&#128269;</div>
+      <div class="scan-name">Reconnaissance</div>
+      <div class="scan-desc">DNS, subdomains, headers, SSL, WHOIS, tech detection, ports</div>
+    </div>
+
+    <div class="scan-type-card" data-type="vuln_scan" onclick="selectScanType(this)">
+      <div class="scan-icon">&#128737;</div>
+      <div class="scan-name">Vulnerability Scan</div>
+      <div class="scan-desc">Nmap, SSL vulns, HTTP checks, CORS, sensitive paths</div>
+    </div>
+
+    <div class="scan-type-card" data-type="web_test" onclick="selectScanType(this)">
+      <div class="scan-icon">&#127760;</div>
+      <div class="scan-name">Web App Test</div>
+      <div class="scan-desc">XSS, SQLi, CSRF, directory traversal, form analysis</div>
+    </div>
+
+    <div class="scan-type-card" data-type="js_analyze" onclick="selectScanType(this)">
+      <div class="scan-icon">&#128196;</div>
+      <div class="scan-name">JS Analysis</div>
+      <div class="scan-desc">Extract endpoints, secrets, API keys from JavaScript</div>
+    </div>
+
+    <div class="scan-type-card" data-type="takeover" onclick="selectScanType(this)">
+      <div class="scan-icon">&#9875;</div>
+      <div class="scan-name">Subdomain Takeover</div>
+      <div class="scan-desc">Detect dangling CNAME records across 18+ services</div>
+    </div>
+
+    <div class="scan-type-card" data-type="checks" onclick="selectScanType(this)">
+      <div class="scan-icon">&#9745;</div>
+      <div class="scan-name">Security Checks</div>
+      <div class="scan-desc">12 built-in checks: exposed files, debug endpoints, backups</div>
+    </div>
+
+    <div class="scan-type-card" data-type="full_auto" onclick="selectScanType(this)">
+      <div class="scan-icon">&#128640;</div>
+      <div class="scan-name">Full Auto</div>
+      <div class="scan-desc">Run ALL modules in sequence - complete assessment</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Options -->
+<div class="card" id="options-card" style="display:none;">
+  <div class="card-title">Options</div>
+  <div id="scan-options"></div>
+</div>
+
+<!-- Launch Button -->
+<div class="flex-between mt-16">
+  <button class="btn btn-primary btn-lg" id="start-btn" onclick="startScan()" disabled>
+    &#9889; Launch Scan
+  </button>
+  <span class="text-dim text-sm" id="status-text"></span>
+</div>
+
+<!-- Live Terminal Output -->
+<div class="card mt-24" id="terminal-card" style="display:none;">
+  <div class="flex-between mb-12">
+    <div class="card-title flex-center gap-8">
+      <span class="spinner" id="scan-spinner"></span>
+      <span id="terminal-title">Scan Output</span>
+    </div>
+    <a href="#" id="view-results-btn" class="btn btn-sm" style="display:none;" onclick="viewResults()">View Results &#8594;</a>
+  </div>
+  <div class="terminal" id="terminal"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let selectedType = null;
+let currentScanId = null;
+const socket = io();
+
+socket.on('scan_output', (data) => {
+  if (data.scan_id === currentScanId) {
+    const terminal = document.getElementById('terminal');
+    // Strip ANSI codes for clean display
+    const clean = data.text.replace(/\x1b\[[0-9;]*m/g, '');
+    terminal.textContent += clean;
+    terminal.scrollTop = terminal.scrollHeight;
+  }
+});
+
+socket.on('scan_status', (data) => {
+  if (data.scan_id === currentScanId) {
+    if (data.status === 'completed' || data.status === 'error') {
+      document.getElementById('scan-spinner').style.display = 'none';
+      document.getElementById('terminal-title').textContent =
+        data.status === 'completed'
+          ? `Scan Complete - ${data.finding_count} findings`
+          : 'Scan Error';
+      document.getElementById('view-results-btn').style.display = 'inline-flex';
+      document.getElementById('start-btn').disabled = false;
+      document.getElementById('status-text').textContent = '';
+    }
+  }
+});
+
+const optionTemplates = {
+  recon: `<label class="form-check"><input type="checkbox" id="opt-passive"> Passive only (no direct contact)</label>`,
+  vuln_scan: `<label class="form-check"><input type="checkbox" id="opt-quick" checked> Quick scan (top ports only)</label>`,
+  web_test: `<label class="form-check"><input type="checkbox" id="opt-full"> Full test (include directory traversal)</label>`,
+  js_analyze: '',
+  takeover: '',
+  checks: '',
+  full_auto: '<p class="text-dim text-sm">Runs all 6 phases: Recon, Vuln Scan, Web Test, JS Analysis, Security Checks, Subdomain Takeover</p>',
+};
+
+function selectScanType(el) {
+  document.querySelectorAll('.scan-type-card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  selectedType = el.dataset.type;
+  document.getElementById('start-btn').disabled = false;
+
+  const opts = optionTemplates[selectedType] || '';
+  const card = document.getElementById('options-card');
+  if (opts) {
+    document.getElementById('scan-options').innerHTML = opts;
+    card.style.display = 'block';
+  } else {
+    card.style.display = 'none';
+  }
+}
+
+async function startScan() {
+  const target = document.getElementById('target-input').value.trim();
+  if (!target) { alert('Enter a target.'); return; }
+  if (!selectedType) { alert('Select a scan type.'); return; }
+
+  const options = {};
+  if (selectedType === 'recon' && document.getElementById('opt-passive')?.checked) options.passive = true;
+  if (selectedType === 'vuln_scan') options.quick = document.getElementById('opt-quick')?.checked ?? true;
+  if (selectedType === 'web_test' && document.getElementById('opt-full')?.checked) options.full = true;
+
+  document.getElementById('start-btn').disabled = true;
+  document.getElementById('status-text').textContent = 'Starting scan...';
+  document.getElementById('terminal-card').style.display = 'block';
+  document.getElementById('terminal').textContent = '';
+  document.getElementById('scan-spinner').style.display = 'inline-block';
+  document.getElementById('terminal-title').textContent = 'Scan Output';
+  document.getElementById('view-results-btn').style.display = 'none';
+
+  try {
+    const resp = await fetch('/api/scan/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target, scan_type: selectedType, options }),
+    });
+    const data = await resp.json();
+    currentScanId = data.scan_id;
+    document.getElementById('status-text').textContent = `Scan ID: ${data.scan_id}`;
+    socket.emit('subscribe_scan', { scan_id: data.scan_id });
+  } catch (e) {
+    document.getElementById('status-text').textContent = 'Error starting scan.';
+    document.getElementById('start-btn').disabled = false;
+  }
+}
+
+function viewResults() {
+  if (currentScanId) window.location.href = `/results/${currentScanId}`;
+}
+</script>
+{% endblock %}

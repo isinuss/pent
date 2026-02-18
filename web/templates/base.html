@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}PENT{% endblock %} - Penetration Testing Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.1/marked.min.js"></script>
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <h1>PENT</h1>
+        <div class="subtitle">Penetration Testing Assistant</div>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="/" class="nav-item {% if active_page == 'dashboard' %}active{% endif %}">
+          <span class="icon">&#9673;</span> Dashboard
+        </a>
+        <a href="/scan" class="nav-item {% if active_page == 'scan' %}active{% endif %}">
+          <span class="icon">&#9889;</span> New Scan
+        </a>
+        <a href="/results" class="nav-item {% if active_page == 'results' %}active{% endif %}">
+          <span class="icon">&#9776;</span> Results
+        </a>
+        <a href="/guides" class="nav-item {% if active_page == 'guides' %}active{% endif %}">
+          <span class="icon">&#9782;</span> Guides
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        Authorized testing only.<br>
+        PENT v2.0
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main-content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
