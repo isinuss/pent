@@ -1,0 +1,39 @@
+# PENT Custom Check Template
+# Place YAML files in the templates/ directory and run them with custom checks module.
+#
+# Fields:
+#   id:          Unique identifier for the check
+#   name:        Human-readable name
+#   severity:    critical / high / medium / low / info
+#   description: What this check does
+#   method:      HTTP method (GET, POST, etc.)
+#   paths:       List of URL paths to test
+#   headers:     Optional extra headers to send
+#   body:        Optional request body (for POST)
+#   matchers:    Conditions that indicate a hit
+#     status:              List of HTTP status codes
+#     body_contains:       List of strings (any match = hit)
+#     body_not_contains:   List of strings (all must be absent)
+#     body_regex:          List of regex patterns
+#     header_contains:     Dict of header: [patterns]
+#     min_content_length:  Minimum response size in bytes
+
+id: example-sensitive-files
+name: Example - Sensitive File Check
+severity: medium
+description: Checks for commonly exposed sensitive files
+method: GET
+paths:
+  - /credentials.json
+  - /secrets.json
+  - /config/database.yml
+  - /.aws/credentials
+  - /.docker/config.json
+matchers:
+  status:
+    - 200
+  body_contains:
+    - "password"
+    - "secret"
+    - "credential"
+    - "access_key"
