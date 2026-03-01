@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head><title>Vulnerable App</title></head>
+<body>
+    <!-- POST form without CSRF token -->
+    <form action="/update-profile" method="POST">
+        <input type="text" name="email">
+        <input type="text" name="name">
+        <textarea name="bio"></textarea>
+        <input type="submit" value="Update">
+    </form>
+
+    <!-- Another POST form without CSRF -->
+    <form action="/delete-account" method="DELETE">
+        <input type="hidden" name="confirm" value="yes">
+        <input type="submit" value="Delete">
+    </form>
+
+    <!-- Reflected XSS canary -->
+    <div class="results">
+        Search results for: pent7x5s9
+    </div>
+
+    <!-- SQL error message -->
+    <div class="error">
+        You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near ''' at line 1
+    </div>
+
+    <!-- Secrets in comments -->
+    <!-- api_key: "AKIAIOSFODNN7EXAMPLE1234" -->
+    <p>Contact: dev@internal.example.com or security@example.com</p>
+
+    <a href="/dashboard?tab=overview&user=1">Dashboard</a>
+    <a href="/profile?id=42">Profile</a>
+</body>
+</html>

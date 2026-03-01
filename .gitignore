@@ -10,3 +10,5 @@ reports/*.json
 dist/
 build/
 .pytest_cache/
+htmlcov/
+.coverage

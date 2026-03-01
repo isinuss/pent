@@ -1,0 +1,14 @@
+id: test-sensitive-config
+name: Test Sensitive Config Files
+severity: high
+description: Checks for exposed config files
+method: GET
+paths:
+  - /config.json
+  - /settings.json
+matchers:
+  status:
+    - 200
+  body_contains:
+    - "password"
+    - "secret"

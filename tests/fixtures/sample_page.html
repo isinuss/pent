@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="generator" content="WordPress 6.4">
+    <title>Test Page</title>
+    <script src="/static/js/app.js"></script>
+    <script src="https://cdn.example.com/lib.js"></script>
+    <link rel="preload" href="/assets/vendor.js" as="script">
+</head>
+<body>
+    <nav>
+        <a href="/about">About</a>
+        <a href="/contact">Contact</a>
+        <a href="https://external.example.com/link">External</a>
+    </nav>
+
+    <!-- GET search form (no CSRF needed) -->
+    <form action="/search" method="GET">
+        <input type="text" name="q" placeholder="Search">
+        <input type="submit" value="Search">
+    </form>
+
+    <!-- POST login form (has CSRF token) -->
+    <form action="/login" method="POST">
+        <input type="hidden" name="csrf_token" value="abc123tokenvalue">
+        <input type="text" name="username">
+        <input type="password" name="password">
+        <input type="submit" value="Login">
+    </form>
+
+    <script>
+        var config = {"apiUrl": "/api/v1/data"};
+    </script>
+
+    <p>Contact us at admin@example.com</p>
+</body>
+</html>
