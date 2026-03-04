@@ -17,51 +17,53 @@ Both tracks consume the same module layer. UI gets priority for new features; CL
 
 ---
 
-## Current State (v0.1)
+## Current State (v0.2.1)
 
-PENT has a modular scanning engine with 8 modules (recon, vuln scan, web test, JS analysis, subdomain takeover, custom checks, guides, reporting). The CLI uses Click + Rich. The web UI is server-rendered Jinja2 templates with Flask and WebSocket streaming.
+PENT has a modular scanning engine with 8 modules (recon, vuln scan, web test, JS analysis, subdomain takeover, custom checks, guides, reporting). The web UI is a React SPA (Vite + Tailwind) with JWT auth, SQLite persistence, and real-time WebSocket streaming. The CLI uses Click + Rich and shares the same module layer.
 
-**What works:** Modular architecture, real-time scan output, multi-format reports, educational guides, scope enforcement.
+**What works:** React SPA with full CRUD, real-time scan output via WebSocket, scan persistence across restarts, JWT + API key auth, rate limiting, multi-format reports, interactive findings with detail drawer, target management with project grouping, automated testing pipeline with recommendations, enhanced port scanner with banner grabbing.
 
-**What doesn't:** Jinja2 templates are not interactive. No persistence (results lost on restart). No auth on the web server. Limited scan depth. High false-positive rate. No team features.
+**What's next:** Deeper scanning (blind SQLi, DOM XSS), auth profile UI, trend charts, recon visualization, async scanning engine.
 
 ---
 
-## Phase 1: Modern UI Foundation + Backend Hardening (v0.2)
+## Phase 1: Modern UI Foundation + Backend Hardening (v0.2) — ~85% Complete
 
 *Goal: Replace the template-based UI with a modern SPA and make the backend production-ready.*
 
 ### Modern Web UI — React SPA
-- [ ] Set up React frontend with Vite, TypeScript, and Tailwind CSS
-- [ ] Implement dark-themed design system (component library)
-- [ ] Build real-time scan terminal with WebSocket streaming (xterm.js or similar)
-- [ ] Dashboard page — scan history, severity breakdown charts, quick actions
-- [ ] New Scan page — target input, module picker, options panel, live progress
-- [ ] Results page — sortable/filterable findings table with severity badges
-- [ ] Scan Detail page — findings list, evidence viewer, inline remediation advice
-- [ ] Guides page — searchable methodology browser with syntax-highlighted checklists
-- [ ] Report export — download MD/HTML/JSON directly from the UI
-- [ ] Responsive layout — usable on tablet and desktop
+- [x] Set up React frontend with Vite, TypeScript, and Tailwind CSS
+- [x] Implement dark-themed design system (component library)
+- [x] Build real-time scan terminal with WebSocket streaming
+- [x] Dashboard page — scan history, severity breakdown charts, quick actions
+- [x] New Scan page — target input, module picker, options panel, live progress
+- [x] Results page — sortable/filterable findings table with severity badges
+- [x] Scan Detail page — findings list, evidence viewer, inline remediation advice
+- [x] Guides page — searchable methodology browser
+- [x] Report export — download MD/HTML/JSON directly from the UI
+- [x] Responsive layout — usable on tablet and desktop
 
 ### Backend API Overhaul
-- [ ] Clean REST API design with versioned endpoints (`/api/v1/`)
+- [x] Clean REST API design with versioned endpoints (`/api/v1/`)
 - [ ] OpenAPI/Swagger spec auto-generated from routes
-- [ ] Consistent JSON response envelope (`{data, error, meta}`)
-- [ ] WebSocket channels per scan (multiplexed output streaming)
+- [x] Consistent JSON response envelope (`{data, error}`)
+- [x] WebSocket channels per scan (multiplexed output streaming)
 - [ ] Request validation with Pydantic or Marshmallow
 
 ### Data Persistence
-- [ ] Add PostgreSQL (primary) with SQLite fallback for single-user mode
-- [ ] Schema: targets, scans, findings, users, configurations
-- [ ] Scan history with full result persistence across restarts
+- [x] SQLite with WAL mode (PostgreSQL deferred to Phase 3)
+- [x] Schema: targets, scans, findings, users, api_keys, auth_profiles
+- [x] Scan history with full result persistence across restarts
+- [x] Finding normalization layer (detail→description, evidence parsing, auto-recommendations)
 - [ ] Finding deduplication across scans on the same target
 - [ ] Scan diffing — compare two scans side-by-side
 
 ### Server Security
-- [ ] JWT-based authentication (login/register)
-- [ ] API key support for programmatic access (CLI + integrations)
-- [ ] CORS restricted to configured origins
-- [ ] Rate limiting on all endpoints
+- [x] JWT-based authentication (login/register)
+- [x] API key support for programmatic access (CLI + integrations)
+- [x] CORS restricted to configured origins
+- [x] Rate limiting on all endpoints (per-IP token bucket)
+- [x] Role-based access control (admin, tester, viewer)
 - [ ] CSRF protection
 
 ### CLI Improvements
@@ -72,23 +74,41 @@ PENT has a modular scanning engine with 8 modules (recon, vuln scan, web test, J
 
 ---
 
-## Phase 2: Interactive UI + Deeper Scanning (v0.3)
+## Phase 2: Interactive UI + Deeper Scanning (v0.3) — ~40% Complete
 
 *Goal: Make the UI truly interactive and expand scan capabilities beyond surface-level checks.*
 
 ### Interactive UI Features
-- [ ] Live findings feed — findings appear in real-time as scan runs (not just terminal output)
-- [ ] Finding detail drawer — click a finding to see full evidence, request/response, remediation
-- [ ] Target management — save targets, group by project/client, track scope
-- [ ] Scan configuration builder — visual module picker with toggles and options
+- [x] Live findings feed — findings appear in real-time as scan runs via WebSocket
+- [x] Finding detail drawer — click a finding to see full evidence, request/response, remediation
+- [x] Target management — save targets, group by project/client, track scope
+- [x] Scan configuration builder — visual module picker with toggles and options
+- [x] Dark/light theme toggle (ThemeToggle component)
 - [ ] Interactive recon map — visual graph of subdomains, IPs, DNS records, tech stack
 - [ ] Severity trend charts — line/bar charts showing findings over time per target
-- [ ] Dark/light theme toggle
+
+### Testing Pipeline *(new — not in original roadmap)*
+- [x] Automated lateral testing pipeline — run all scan phases sequentially against a target
+- [x] Pipeline API endpoints (`/api/v1/pipeline/phases`, `/pipeline/start`, `/pipeline/<target>/recommendations`)
+- [x] Real-time pipeline progress tracking via WebSocket (per-phase status)
+- [x] Auto-generated recommendations based on aggregated findings
+- [x] Pipeline accessible from sidebar nav and target action buttons
+- [x] Phase selection UI — choose which phases to include
+
+### Enhanced Port Scanner *(upgraded from original roadmap)*
+- [x] Concurrent port scanning with ThreadPoolExecutor (20 workers)
+- [x] Banner grabbing for open services (SSH, FTP, SMTP, HTTP)
+- [x] Service version detection from banners
+- [x] 50+ ports including modern services (Docker, K8s, RabbitMQ, Prometheus, etc.)
+- [x] Risky service warnings (Redis, MongoDB, Docker, K8s exposed)
+- [ ] Full async port scanning with asyncio (Phase 5)
+- [ ] Shodan & Censys integration (user-provided API keys)
 
 ### Authenticated Testing
-- [ ] Auth profile management in UI — save cookie/header/bearer token configs
+- [x] Auth profile backend — save cookie/header/bearer token/form-based configs
+- [x] Session-aware scanning — apply auth profiles to web testing module
+- [ ] Auth profile management UI — visual config editor in frontend
 - [ ] Login sequence recorder — define form-based login flows visually
-- [ ] Session-aware scanning — maintain auth state across modules
 - [ ] Authenticated path discovery and form testing
 
 ### Advanced Web Testing
@@ -100,9 +120,6 @@ PENT has a modular scanning engine with 8 modules (recon, vuln scan, web test, J
 - [ ] WebSocket security testing
 
 ### Enhanced Reconnaissance
-- [ ] Async port scanning (replace socket-based scanner with masscan/async)
-- [ ] Expanded port range options (top 100 / 1000 / full)
-- [ ] Shodan & Censys integration (user-provided API keys, configured in UI)
 - [ ] DNS zone transfer testing
 - [ ] Virtual host discovery
 - [ ] WAF detection and fingerprinting
@@ -120,12 +137,17 @@ PENT has a modular scanning engine with 8 modules (recon, vuln scan, web test, J
 *Goal: PENT becomes a team platform that integrates into professional security workflows.*
 
 ### Team & Collaboration
-- [ ] Multi-user with roles: admin, tester, viewer
+- [x] Multi-user with roles: admin, tester, viewer *(done in Phase 1)*
 - [ ] Organization/workspace model — isolated scan data per team
 - [ ] Finding annotations — add notes, screenshots, proof-of-concept
 - [ ] Finding workflow: new → confirmed → mitigated → verified → closed
 - [ ] Activity feed — who scanned what, when
 - [ ] @mention and comments on findings
+
+### Data Layer Upgrade
+- [ ] PostgreSQL support for team deployments
+- [ ] Finding deduplication across scans
+- [ ] Scan diffing — compare two scans side-by-side
 
 ### Proxy & Tool Integration
 - [ ] Route scans through configurable HTTP/SOCKS proxy (Burp, ZAP)
@@ -255,8 +277,8 @@ These are explicitly out of scope:
          │              │                 │
     ┌────▼──────────────▼─────────────────▼────┐
     │          REST API + WebSocket             │
-    │       (Flask / FastAPI + SocketIO)        │
-    │         JWT Auth · Rate Limiting          │
+    │         (Flask + SocketIO)                │
+    │     JWT Auth · Rate Limiting · RBAC      │
     ├──────────────────────────────────────────-┤
     │            Scanning Engine                │
     │                                           │
@@ -267,9 +289,14 @@ These are explicitly out of scope:
     │  ┌────────┐ ┌───────┐ ┌──────┐ ┌──────┐  │
     │  │Takeover│ │Checks │ │Guide │ │Report│  │
     │  └────────┘ └───────┘ └──────┘ └──────┘  │
+    │  ┌────────────────────────────────────┐   │
+    │  │  Pipeline Orchestrator (new)       │   │
+    │  │  Sequential phase execution +      │   │
+    │  │  recommendation engine             │   │
+    │  └────────────────────────────────────┘   │
     ├───────────────────────────────────────────┤
     │          Data Layer                       │
-    │   PostgreSQL / SQLite · File Storage      │
+    │   SQLite (WAL) · Finding Normalizer      │
     └───────────────────────────────────────────┘
 ```
 
@@ -277,13 +304,13 @@ These are explicitly out of scope:
 
 ## Versioning & Release Cadence
 
-| Version | Phase | UI Focus | CLI Focus |
-|---------|-------|----------|-----------|
-| v0.2 | Foundation | React SPA, dashboard, live terminal | Server auth, JSON output, push/pull |
-| v0.3 | Deeper Testing | Interactive findings, recon graph, auth profiles | Advanced scan flags, async scanning |
-| v0.4 | Team Platform | Collaboration, annotations, integrations | Proxy routing, API testing commands |
-| v0.5 | Automation | Scan scheduler, visual check builder, dashboards | Profiles, cron, compliance reports |
-| v1.0 | Platform | Plugin marketplace, branded reports | CI/CD actions, SARIF, plugin CLI |
+| Version | Phase | Status | UI Focus | CLI Focus |
+|---------|-------|--------|----------|-----------|
+| v0.2 | Foundation | **~85%** | React SPA, dashboard, live terminal | Server auth, JSON output |
+| v0.3 | Deeper Testing | **~40%** | Pipeline, findings drawer, auth profiles | Advanced scan flags, async scanning |
+| v0.4 | Team Platform | Planned | Collaboration, annotations, integrations | Proxy routing, API testing commands |
+| v0.5 | Automation | Planned | Scan scheduler, visual check builder, dashboards | Profiles, cron, compliance reports |
+| v1.0 | Platform | Planned | Plugin marketplace, branded reports | CI/CD actions, SARIF, plugin CLI |
 
 ---
 
