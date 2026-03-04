@@ -9,12 +9,12 @@ Always obtain written permission before testing any target.
 
 import sys
 import os
+import json as json_mod
 import click
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.prompt import Prompt, Confirm
-from rich.markdown import Markdown
 from rich import box
 
 # Add project root to path
@@ -84,182 +84,274 @@ def main_menu():
     console.print()
 
 
+def output_json(data):
+    """Print JSON output to stdout."""
+    click.echo(json_mod.dumps(data, indent=2, default=str))
+
+
 # ======================================================================
 # CLI Commands
 # ======================================================================
 
 @click.group(invoke_without_command=True)
+@click.option("--json", "json_output", is_flag=True, help="Output results as JSON")
 @click.pass_context
-def cli(ctx):
+def cli(ctx, json_output):
     """PENT - Penetration Testing Assistant for white-hat testing & bug bounties."""
+    ctx.ensure_object(dict)
+    ctx.obj["json"] = json_output
+    if json_output:
+        # Suppress rich output in JSON mode
+        ctx.obj["console"] = Console(file=open(os.devnull, "w"), quiet=True)
+    else:
+        ctx.obj["console"] = console
     if ctx.invoked_subcommand is None:
-        interactive_mode()
+        if json_output:
+            output_json({"error": "No command specified. Use --help to see available commands."})
+        else:
+            interactive_mode()
 
 
 @cli.command()
 @click.argument("target")
 @click.option("--passive", is_flag=True, help="Passive recon only (no direct contact)")
-def recon(target, passive):
+@click.pass_context
+def recon(ctx, target, passive):
     """Run reconnaissance against a target."""
-    show_banner()
-    mod = ReconModule(console)
-    mod.run(target, passive_only=passive)
+    c = ctx.obj["console"]
+    if not ctx.obj["json"]:
+        show_banner()
+    mod = ReconModule(c)
+    findings = mod.run(target, passive_only=passive)
+    if ctx.obj["json"]:
+        output_json({"target": target, "scan_type": "recon", "findings": findings})
 
 
 @cli.command()
 @click.argument("target")
 @click.option("--quick", is_flag=True, help="Quick scan (top ports only)")
-def scan(target, quick):
+@click.pass_context
+def scan(ctx, target, quick):
     """Run vulnerability scan against a target."""
-    show_banner()
-    mod = VulnScannerModule(console)
-    mod.run(target, quick=quick)
+    c = ctx.obj["console"]
+    if not ctx.obj["json"]:
+        show_banner()
+    mod = VulnScannerModule(c)
+    findings = mod.run(target, quick=quick)
+    if ctx.obj["json"]:
+        output_json({"target": target, "scan_type": "vuln_scan", "findings": findings})
 
 
 @cli.command()
 @click.argument("url")
 @click.option("--full", is_flag=True, help="Run all web tests")
-def webtest(url, full):
+@click.pass_context
+def webtest(ctx, url, full):
     """Run web application tests against a URL."""
-    show_banner()
-    mod = WebTesterModule(console)
-    mod.run(url, full=full)
+    c = ctx.obj["console"]
+    if not ctx.obj["json"]:
+        show_banner()
+    mod = WebTesterModule(c)
+    findings = mod.run(url, full=full)
+    if ctx.obj["json"]:
+        output_json({"target": url, "scan_type": "web_test", "findings": findings})
 
 
 @cli.command()
 @click.argument("url")
-def jsanalyze(url):
+@click.pass_context
+def jsanalyze(ctx, url):
     """Analyze JavaScript files for endpoints and secrets."""
-    show_banner()
-    mod = JSAnalyzerModule(console)
-    mod.analyze(url)
+    c = ctx.obj["console"]
+    if not ctx.obj["json"]:
+        show_banner()
+    mod = JSAnalyzerModule(c)
+    findings = mod.analyze(url)
+    if ctx.obj["json"]:
+        output_json({"target": url, "scan_type": "js_analyze", "findings": findings})
 
 
 @cli.command()
 @click.argument("target")
-def takeover(target):
+@click.pass_context
+def takeover(ctx, target):
     """Check subdomains for takeover vulnerabilities."""
-    show_banner()
-    recon_mod = ReconModule(console)
+    c = ctx.obj["console"]
+    if not ctx.obj["json"]:
+        show_banner()
+    recon_mod = ReconModule(c)
     domain = target.replace("https://", "").replace("http://", "").split("/")[0]
     subs = recon_mod.subdomain_enum(domain)
+    findings = []
     if subs:
-        mod = TakeoverModule(console)
-        mod.check_subdomains(subs)
+        mod = TakeoverModule(c)
+        findings = mod.check_subdomains(subs)
+    if ctx.obj["json"]:
+        output_json({"target": target, "scan_type": "takeover", "findings": findings})
 
 
 @cli.command()
 @click.argument("target")
 @click.option("--custom-dir", type=str, default=None, help="Directory with custom YAML checks")
-def checks(target, custom_dir):
+@click.pass_context
+def checks(ctx, target, custom_dir):
     """Run built-in and custom security checks."""
-    show_banner()
-    mod = CustomChecksModule(console)
-    mod.run_all_builtin(target)
+    c = ctx.obj["console"]
+    if not ctx.obj["json"]:
+        show_banner()
+    mod = CustomChecksModule(c)
+    findings = mod.run_all_builtin(target)
     if custom_dir:
-        mod.run_custom_checks(target, custom_dir)
+        findings.extend(mod.run_custom_checks(target, custom_dir))
+    if ctx.obj["json"]:
+        output_json({"target": target, "scan_type": "checks", "findings": findings})
 
 
 @cli.command()
 @click.option("--topic", type=str, default=None, help="Specific topic to view")
-def guide(topic):
+@click.pass_context
+def guide(ctx, topic):
     """View methodology guides and checklists."""
+    if ctx.obj["json"]:
+        from modules.guide import METHODOLOGIES
+        if topic:
+            data = METHODOLOGIES.get(topic)
+            if data:
+                output_json({"topic": topic, "guide": data})
+            else:
+                output_json({"error": f"Guide '{topic}' not found", "available": list(METHODOLOGIES.keys())})
+        else:
+            output_json({"guides": [{"key": k, "title": v["title"]} for k, v in METHODOLOGIES.items()]})
+        return
     show_banner()
-    mod = GuideModule(console)
+    mod = GuideModule(ctx.obj["console"])
     mod.run(topic=topic)
 
 
 @cli.command()
 @click.option("--output", type=str, default="reports", help="Output directory")
 @click.option("--fmt", type=click.Choice(["md", "html", "json"]), default="md")
-def report(output, fmt):
+@click.pass_context
+def report(ctx, output, fmt):
     """Generate a report from findings."""
-    show_banner()
-    mod = ReporterModule(console)
-    mod.run(output_dir=output, fmt=fmt)
+    if not ctx.obj["json"]:
+        show_banner()
+    mod = ReporterModule(ctx.obj["console"])
+    filepath = mod.run(output_dir=output, fmt=fmt)
+    if ctx.obj["json"]:
+        output_json({"report_path": filepath, "format": fmt})
 
 
 @cli.command()
 @click.argument("target")
 @click.option("--output", type=str, default="reports", help="Report output directory")
 @click.option("--fmt", type=click.Choice(["md", "html", "json"]), default="html")
-def auto(target, output, fmt):
+@click.pass_context
+def auto(ctx, target, output, fmt):
     """Run full automated assessment (all modules)."""
-    show_banner()
-    run_full_auto(target, output, fmt)
+    c = ctx.obj["console"]
+    if not ctx.obj["json"]:
+        show_banner()
+    findings = run_full_auto(target, output, fmt, c, quiet=ctx.obj["json"])
+    if ctx.obj["json"]:
+        severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        for f in findings:
+            sev = f.get("severity", "info").lower()
+            if sev in severity_counts:
+                severity_counts[sev] += 1
+        output_json({
+            "target": target,
+            "scan_type": "full_auto",
+            "total_findings": len(findings),
+            "severity_counts": severity_counts,
+            "findings": findings,
+        })
 
 
 # ======================================================================
 # Full Auto Mode
 # ======================================================================
 
-def run_full_auto(target: str, output_dir: str = "reports", fmt: str = "html"):
+def run_full_auto(target: str, output_dir: str = "reports", fmt: str = "html",
+                  con: Console = None, quiet: bool = False):
     """Run all modules in sequence and generate a combined report."""
+    if con is None:
+        con = console
     domain = target.replace("https://", "").replace("http://", "").split("/")[0]
     url = target if target.startswith("http") else f"https://{target}"
 
     all_findings = []
 
     # Phase 1: Recon
-    console.print(Panel("[bold]Phase 1/6: Reconnaissance[/bold]", border_style="cyan"))
-    recon_mod = ReconModule(console)
+    if not quiet:
+        con.print(Panel("[bold]Phase 1/6: Reconnaissance[/bold]", border_style="cyan"))
+    recon_mod = ReconModule(con)
     all_findings.extend(recon_mod.run(target))
 
     # Phase 2: Vuln Scan
-    console.print(Panel("[bold]Phase 2/6: Vulnerability Scanning[/bold]", border_style="cyan"))
-    vuln_mod = VulnScannerModule(console)
+    if not quiet:
+        con.print(Panel("[bold]Phase 2/6: Vulnerability Scanning[/bold]", border_style="cyan"))
+    vuln_mod = VulnScannerModule(con)
     all_findings.extend(vuln_mod.run(target, quick=True))
 
     # Phase 3: Web Tests
-    console.print(Panel("[bold]Phase 3/6: Web Application Testing[/bold]", border_style="cyan"))
-    web_mod = WebTesterModule(console)
+    if not quiet:
+        con.print(Panel("[bold]Phase 3/6: Web Application Testing[/bold]", border_style="cyan"))
+    web_mod = WebTesterModule(con)
     all_findings.extend(web_mod.run(url, full=True))
 
     # Phase 4: JS Analysis
-    console.print(Panel("[bold]Phase 4/6: JavaScript Analysis[/bold]", border_style="cyan"))
-    js_mod = JSAnalyzerModule(console)
+    if not quiet:
+        con.print(Panel("[bold]Phase 4/6: JavaScript Analysis[/bold]", border_style="cyan"))
+    js_mod = JSAnalyzerModule(con)
     all_findings.extend(js_mod.analyze(url))
 
     # Phase 5: Custom Checks
-    console.print(Panel("[bold]Phase 5/6: Security Checks[/bold]", border_style="cyan"))
-    checks_mod = CustomChecksModule(console)
+    if not quiet:
+        con.print(Panel("[bold]Phase 5/6: Security Checks[/bold]", border_style="cyan"))
+    checks_mod = CustomChecksModule(con)
     all_findings.extend(checks_mod.run_all_builtin(target))
 
     # Phase 6: Subdomain Takeover
-    console.print(Panel("[bold]Phase 6/6: Subdomain Takeover Check[/bold]", border_style="cyan"))
+    if not quiet:
+        con.print(Panel("[bold]Phase 6/6: Subdomain Takeover Check[/bold]", border_style="cyan"))
     subs = recon_mod.subdomain_enum(domain)
     if subs:
-        takeover_mod = TakeoverModule(console)
+        takeover_mod = TakeoverModule(con)
         all_findings.extend(takeover_mod.check_subdomains(subs[:50]))
 
     # Generate Report
-    console.print(Panel("[bold]Generating Report[/bold]", border_style="green"))
-    reporter = ReporterModule(console)
+    if not quiet:
+        con.print(Panel("[bold]Generating Report[/bold]", border_style="green"))
+    reporter = ReporterModule(con)
     reporter.target = domain
     reporter.tester = "PENT Auto Assessment"
     reporter.add_findings(all_findings)
     filepath = reporter.run(output_dir=output_dir, fmt=fmt)
 
     # Summary
-    severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
-    for f in all_findings:
-        sev = f.get("severity", "info").lower()
-        if sev in severity_counts:
-            severity_counts[sev] += 1
+    if not quiet:
+        severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        for f in all_findings:
+            sev = f.get("severity", "info").lower()
+            if sev in severity_counts:
+                severity_counts[sev] += 1
 
-    summary = Table(title="Assessment Summary", box=box.DOUBLE)
-    summary.add_column("Severity", style="bold")
-    summary.add_column("Count", style="bold")
+        summary = Table(title="Assessment Summary", box=box.DOUBLE)
+        summary.add_column("Severity", style="bold")
+        summary.add_column("Count", style="bold")
 
-    summary.add_row("[bold red]Critical[/bold red]", str(severity_counts["critical"]))
-    summary.add_row("[red]High[/red]", str(severity_counts["high"]))
-    summary.add_row("[yellow]Medium[/yellow]", str(severity_counts["medium"]))
-    summary.add_row("[green]Low[/green]", str(severity_counts["low"]))
-    summary.add_row("[dim]Info[/dim]", str(severity_counts["info"]))
-    summary.add_row("[bold]Total[/bold]", f"[bold]{len(all_findings)}[/bold]")
+        summary.add_row("[bold red]Critical[/bold red]", str(severity_counts["critical"]))
+        summary.add_row("[red]High[/red]", str(severity_counts["high"]))
+        summary.add_row("[yellow]Medium[/yellow]", str(severity_counts["medium"]))
+        summary.add_row("[green]Low[/green]", str(severity_counts["low"]))
+        summary.add_row("[dim]Info[/dim]", str(severity_counts["info"]))
+        summary.add_row("[bold]Total[/bold]", f"[bold]{len(all_findings)}[/bold]")
 
-    console.print(summary)
-    console.print(f"\n[bold green]Report saved: {filepath}[/bold green]")
+        con.print(summary)
+        con.print(f"\n[bold green]Report saved: {filepath}[/bold green]")
+
+    return all_findings
 
 
 # ======================================================================
