@@ -4,6 +4,8 @@ data from JavaScript files found on the target.
 """
 
 import re
+import math
+import json as _json
 from datetime import datetime
 from urllib.parse import urlparse, urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -17,8 +19,40 @@ from rich.prompt import Prompt
 from rich import box
 
 
+def _shannon_entropy(data: str) -> float:
+    """Calculate Shannon entropy of a string."""
+    if not data:
+        return 0.0
+    freq = {}
+    for c in data:
+        freq[c] = freq.get(c, 0) + 1
+    length = len(data)
+    return -sum((count/length) * math.log2(count/length) for count in freq.values())
+
+
 class JSAnalyzerModule:
     """Analyze JavaScript files for endpoints, secrets, and interesting data."""
+
+    # Patterns considered structural matches (format alone is strong signal)
+    _STRUCTURAL_PATTERNS = {
+        "AWS Access Key",
+        "GitHub Token",
+        "Slack Token",
+        "Slack Webhook",
+        "Stripe Key",
+        "SendGrid",
+        "JWT Token",
+        "Private Key",
+        "Database URL",
+        "DigitalOcean Token",
+        "Mapbox Token",
+        "Discord Webhook",
+        "Telegram Bot Token",
+        "Azure Storage Key",
+        "HashiCorp Vault Token",
+        "npm Token",
+        "PyPI Token",
+    }
 
     def __init__(self, console: Console):
         self.console = console
@@ -147,6 +181,19 @@ class JSAnalyzerModule:
             ("Authorization Header", r'["\'](?:Authorization|X-API-Key)["\']:\s*["\']([^"\']+)["\']'),
             ("Database URL", r'(?:mongodb|postgres|mysql|redis)://[^\s"\'<>]+'),
             ("Heroku API Key", r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'),
+            # -- Expanded secret patterns --
+            ("Datadog API Key", r'(?:datadog|dd)[_-]?(?:api[_-]?key|app[_-]?key)\s*[:=]\s*["\']([a-f0-9]{32})["\']'),
+            ("New Relic Key", r'(?:NRAK|NRIQ|NRII)-[A-Za-z0-9]{27}'),
+            ("Cloudflare API", r'(?:cloudflare|cf)[_-]?(?:api[_-]?key|token)\s*[:=]\s*["\']([a-zA-Z0-9_-]{37,})["\']'),
+            ("DigitalOcean Token", r'dop_v1_[a-f0-9]{64}'),
+            ("Mapbox Token", r'(?:pk|sk)\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'),
+            ("Discord Token", r'[MN][A-Za-z\d]{23,}\.[\w-]{6}\.[\w-]{27}'),
+            ("Discord Webhook", r'https://discord(?:app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+'),
+            ("Telegram Bot Token", r'[0-9]+:AA[0-9A-Za-z_-]{33}'),
+            ("Azure Storage Key", r'DefaultEndpointsProtocol=https;AccountName=[^;]+;AccountKey=[A-Za-z0-9+/=]{88}'),
+            ("HashiCorp Vault Token", r'(?:hvs|hvb|hvr)\.[A-Za-z0-9_-]{24,}'),
+            ("npm Token", r'npm_[A-Za-z0-9]{36}'),
+            ("PyPI Token", r'pypi-AgE[A-Za-z0-9_-]{50,}'),
         ]
 
         for name, pattern in secret_patterns:
@@ -155,19 +202,141 @@ class JSAnalyzerModule:
                 # Avoid false positives
                 if isinstance(match, str) and len(match) > 200:
                     continue
-                # Mask the secret for display
+
                 val = match if isinstance(match, str) else str(match)
+
+                # Entropy-based filtering
+                entropy = _shannon_entropy(val)
+                is_structural = name in self._STRUCTURAL_PATTERNS
+
+                if entropy < 3.5 and not is_structural:
+                    # Low entropy and not a structural pattern -- likely a false positive
+                    continue
+
+                # Mask the secret for display
                 if len(val) > 12:
                     masked = val[:6] + "..." + val[-4:]
                 else:
                     masked = val[:3] + "***"
+
                 secrets.append({
                     "type": name,
                     "value_masked": masked,
+                    "entropy": round(entropy, 2),
                     "source": source_file,
                 })
 
         return secrets
+
+    # ------------------------------------------------------------------
+    # Live secret validation (non-destructive, read-only checks)
+    # ------------------------------------------------------------------
+    def validate_secret(self, secret_type: str, value: str) -> dict:
+        """
+        Attempt to validate if a detected secret is actually active/live.
+
+        Only performs non-destructive, read-only checks. Returns a dict
+        with keys: validated (bool), active (bool), reason (str).
+        """
+        result = {"validated": False, "active": False, "reason": "No validator available"}
+
+        try:
+            if secret_type == "AWS Access Key":
+                # Need both access key and secret key for AWS validation.
+                # Attempt using boto3 if available.
+                try:
+                    import boto3
+                    from botocore.exceptions import ClientError, NoCredentialsError
+                    # value is expected to be "ACCESS_KEY:SECRET_KEY" for full validation
+                    if ":" in value:
+                        access_key, secret_key = value.split(":", 1)
+                    else:
+                        return {"validated": False, "active": False, "reason": "Need SECRET_KEY to validate (pass as ACCESS_KEY:SECRET_KEY)"}
+                    client = boto3.client(
+                        "sts",
+                        aws_access_key_id=access_key,
+                        aws_secret_access_key=secret_key,
+                        region_name="us-east-1",
+                    )
+                    identity = client.get_caller_identity()
+                    return {
+                        "validated": True,
+                        "active": True,
+                        "reason": f"Key is active. Account: {identity.get('Account', 'unknown')}",
+                    }
+                except ImportError:
+                    return {"validated": False, "active": False, "reason": "boto3 not installed, skipping AWS validation"}
+                except ClientError as e:
+                    error_code = e.response.get("Error", {}).get("Code", "")
+                    if error_code in ("InvalidClientTokenId", "SignatureDoesNotMatch"):
+                        return {"validated": True, "active": False, "reason": f"Key is invalid or inactive: {error_code}"}
+                    return {"validated": True, "active": False, "reason": f"AWS error: {error_code}"}
+                except Exception as e:
+                    return {"validated": False, "active": False, "reason": f"AWS validation error: {e}"}
+
+            elif secret_type == "GitHub Token":
+                resp = requests.get(
+                    "https://api.github.com/user",
+                    headers={"Authorization": f"Bearer {value}"},
+                    timeout=5,
+                )
+                if resp.status_code == 200:
+                    username = resp.json().get("login", "unknown")
+                    return {"validated": True, "active": True, "reason": f"Token is active. User: {username}"}
+                elif resp.status_code == 401:
+                    return {"validated": True, "active": False, "reason": "Token is invalid or expired (401)"}
+                else:
+                    return {"validated": True, "active": False, "reason": f"Unexpected status: {resp.status_code}"}
+
+            elif secret_type == "Slack Token":
+                resp = requests.get(
+                    "https://slack.com/api/auth.test",
+                    headers={"Authorization": f"Bearer {value}"},
+                    timeout=5,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("ok"):
+                        return {"validated": True, "active": True, "reason": f"Token is active. Team: {data.get('team', 'unknown')}"}
+                    else:
+                        return {"validated": True, "active": False, "reason": f"Token invalid: {data.get('error', 'unknown')}"}
+                else:
+                    return {"validated": True, "active": False, "reason": f"Unexpected status: {resp.status_code}"}
+
+            elif secret_type == "Stripe Key":
+                resp = requests.get(
+                    "https://api.stripe.com/v1/charges?limit=1",
+                    auth=(value, ""),
+                    timeout=5,
+                )
+                if resp.status_code == 200:
+                    return {"validated": True, "active": True, "reason": "Stripe key is active"}
+                elif resp.status_code == 401:
+                    return {"validated": True, "active": False, "reason": "Stripe key is invalid (401)"}
+                else:
+                    return {"validated": True, "active": False, "reason": f"Unexpected status: {resp.status_code}"}
+
+            elif secret_type == "Google API Key":
+                resp = requests.get(
+                    f"https://www.googleapis.com/oauth2/v3/tokeninfo?access_token={value}",
+                    timeout=5,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return {"validated": True, "active": True, "reason": f"Token is active. Scope: {data.get('scope', 'unknown')}"}
+                elif resp.status_code in (400, 401):
+                    return {"validated": True, "active": False, "reason": "Token is invalid or expired"}
+                else:
+                    return {"validated": True, "active": False, "reason": f"Unexpected status: {resp.status_code}"}
+
+        except requests.exceptions.Timeout:
+            result = {"validated": False, "active": False, "reason": "Validation request timed out"}
+        except requests.exceptions.ConnectionError:
+            result = {"validated": False, "active": False, "reason": "Connection error during validation"}
+        except Exception as e:
+            result = {"validated": False, "active": False, "reason": f"Validation error: {e}"}
+
+        return result
 
     # ------------------------------------------------------------------
     # Extract interesting strings (domains, IPs, emails)
@@ -219,6 +388,137 @@ class JSAnalyzerModule:
             results["cloud_urls"].update(matches)
 
         return results
+
+    # ------------------------------------------------------------------
+    # Source map parsing
+    # ------------------------------------------------------------------
+    def parse_source_maps(self, url: str) -> list:
+        """
+        Discover and parse JavaScript source maps.
+
+        For each discovered JS file, checks for a corresponding .map file and
+        for sourceMappingURL comments. If a source map is found, parses the
+        JSON to extract original source file paths and searches sourcesContent
+        for secrets.
+
+        Returns a list of source map URLs found.
+        """
+        source_map_urls = []
+
+        try:
+            js_files = self.discover_js_files(url)
+        except Exception as e:
+            self.console.print(f"[red]Error discovering JS files for source maps: {e}[/red]")
+            return source_map_urls
+
+        for js_url in js_files:
+            try:
+                resp = self.session.get(js_url, timeout=15)
+                js_content = resp.text
+
+                map_urls_to_check = []
+
+                # Strategy 1: Look for sourceMappingURL comment in the JS source
+                mapping_match = re.search(r'//[#@]\s*sourceMappingURL\s*=\s*(\S+)', js_content)
+                if mapping_match:
+                    raw_map_url = mapping_match.group(1).strip()
+                    resolved_map_url = urljoin(js_url, raw_map_url)
+                    map_urls_to_check.append(resolved_map_url)
+
+                # Strategy 2: Try appending .map to the JS URL
+                guessed_map_url = js_url + ".map"
+                if guessed_map_url not in map_urls_to_check:
+                    map_urls_to_check.append(guessed_map_url)
+
+                for map_url in map_urls_to_check:
+                    try:
+                        map_resp = self.session.get(map_url, timeout=10)
+                        if map_resp.status_code != 200:
+                            continue
+
+                        # Verify it looks like JSON before parsing
+                        content_type = map_resp.headers.get("Content-Type", "")
+                        body = map_resp.text.strip()
+                        if not (body.startswith("{") or "application/json" in content_type):
+                            continue
+
+                        try:
+                            source_map = _json.loads(body)
+                        except _json.JSONDecodeError:
+                            continue
+
+                        if not isinstance(source_map, dict):
+                            continue
+
+                        # Successfully found a source map
+                        if map_url not in source_map_urls:
+                            source_map_urls.append(map_url)
+
+                        self.console.print(f"[yellow][!] Source map found: {map_url}[/yellow]")
+
+                        # Flag source map availability as a medium-severity finding
+                        self._add_finding(
+                            "medium",
+                            "Source Map",
+                            f"Source map exposed: {map_url}",
+                            "Source maps expose original source code and internal directory structure.",
+                            map_url,
+                        )
+
+                        # Extract original source file paths (reveals internal directory structure)
+                        sources = source_map.get("sources", [])
+                        if sources:
+                            self.console.print(f"  [cyan]Original source paths ({len(sources)}):[/cyan]")
+                            for src_path in sources[:25]:
+                                self.console.print(f"    [dim]{src_path}[/dim]")
+                                self._add_finding(
+                                    "low",
+                                    "Source Map Path",
+                                    f"Internal path disclosed: {src_path}",
+                                    f"Source map reveals internal file path: {src_path}",
+                                    map_url,
+                                )
+                            if len(sources) > 25:
+                                self.console.print(f"    [dim]... and {len(sources) - 25} more paths[/dim]")
+
+                        # Search sourcesContent for secrets
+                        sources_content = source_map.get("sourcesContent", [])
+                        if sources_content:
+                            self.console.print(f"  [cyan]Scanning {len(sources_content)} source files for secrets...[/cyan]")
+                            for idx, src_content in enumerate(sources_content):
+                                if not src_content or not isinstance(src_content, str):
+                                    continue
+                                source_name = sources[idx] if idx < len(sources) else f"source[{idx}]"
+                                found_secrets = self.extract_secrets(src_content, source_file=f"{map_url} -> {source_name}")
+                                for secret in found_secrets:
+                                    self.console.print(
+                                        f"    [red][!] Secret in source map content: {secret['type']} "
+                                        f"(entropy: {secret['entropy']}) in {source_name}[/red]"
+                                    )
+                                    self._add_finding(
+                                        "high",
+                                        "Source Map Secret",
+                                        f"{secret['type']} found in source map content",
+                                        f"Masked: {secret['value_masked']} (entropy: {secret['entropy']})",
+                                        f"{map_url} -> {source_name}",
+                                    )
+
+                        # Found a valid map for this JS file, skip remaining candidates
+                        break
+
+                    except requests.exceptions.Timeout:
+                        self.console.print(f"  [dim]Timeout checking {map_url}[/dim]")
+                    except requests.exceptions.ConnectionError:
+                        pass
+                    except Exception as e:
+                        self.console.print(f"  [dim]Error checking {map_url}: {e}[/dim]")
+
+            except requests.exceptions.Timeout:
+                self.console.print(f"[dim]Timeout fetching {js_url}[/dim]")
+            except Exception as e:
+                self.console.print(f"[dim]Error processing {js_url} for source maps: {e}[/dim]")
+
+        return source_map_urls
 
     # ------------------------------------------------------------------
     # Analyze a single JS file
@@ -310,13 +610,14 @@ class JSAnalyzerModule:
             table = Table(title=f"Potential Secrets ({len(all_secrets)})", box=box.SIMPLE)
             table.add_column("Type", style="red")
             table.add_column("Value (masked)", style="yellow")
+            table.add_column("Entropy", style="magenta")
             table.add_column("Source", style="dim", max_width=50)
 
             for s in all_secrets:
-                table.add_row(s["type"], s["value_masked"], s["source"].split("/")[-1])
+                table.add_row(s["type"], s["value_masked"], str(s["entropy"]), s["source"].split("/")[-1])
                 self._add_finding(
                     "high", "JS Secret", f"{s['type']} found in JS",
-                    f"Masked: {s['value_masked']}", s["source"]
+                    f"Masked: {s['value_masked']} (entropy: {s['entropy']})", s["source"]
                 )
 
             self.console.print(table)
@@ -340,6 +641,12 @@ class JSAnalyzerModule:
                 if len(data) > 20:
                     self.console.print(f"  [dim]... and {len(data) - 20} more[/dim]")
 
+        # Phase: Source map analysis
+        self.console.print(Panel("[bold]Source Map Analysis[/bold]", border_style="cyan"))
+        source_maps = self.parse_source_maps(url)
+        if source_maps:
+            self.console.print(f"[yellow][!] Found {len(source_maps)} source maps — internal code may be exposed.[/yellow]")
+
         self.console.print(f"\n[bold green]JS analysis complete. {len(self.findings)} findings.[/bold green]")
         return self.findings
 
@@ -355,11 +662,13 @@ class JSAnalyzerModule:
         table.add_row("1", "Discover JS files")
         table.add_row("2", "Full JS analysis (endpoints + secrets)")
         table.add_row("3", "Analyze specific JS URL")
+        table.add_row("4", "Source map analysis")
+        table.add_row("5", "Validate a secret (live check)")
         table.add_row("0", "Back to main menu")
 
         self.console.print(table)
 
-        choice = Prompt.ask("Select", choices=["0", "1", "2", "3"])
+        choice = Prompt.ask("Select", choices=["0", "1", "2", "3", "4", "5"])
 
         if choice == "1":
             self.discover_js_files(target)
@@ -375,4 +684,25 @@ class JSAnalyzerModule:
             if result["secrets"]:
                 self.console.print(f"\n[bold red]Secrets ({len(result['secrets'])}):[/bold red]")
                 for s in result["secrets"]:
-                    self.console.print(f"  [red]{s['type']}: {s['value_masked']}[/red]")
+                    self.console.print(f"  [red]{s['type']}: {s['value_masked']} (entropy: {s['entropy']})[/red]")
+        elif choice == "4":
+            self.console.print(Panel("[bold]Source Map Analysis[/bold]", border_style="cyan"))
+            source_maps = self.parse_source_maps(target)
+            if source_maps:
+                self.console.print(f"\n[yellow][!] Found {len(source_maps)} source maps:[/yellow]")
+                for sm_url in source_maps:
+                    self.console.print(f"  [yellow]{sm_url}[/yellow]")
+            else:
+                self.console.print("[green]No source maps found.[/green]")
+        elif choice == "5":
+            secret_type = Prompt.ask("Secret type (e.g. GitHub Token, AWS Access Key, Slack Token, Stripe Key, Google API Key)")
+            secret_value = Prompt.ask("Secret value (will be used for validation only)")
+            self.console.print("[dim]Validating secret (read-only check)...[/dim]")
+            result = self.validate_secret(secret_type, secret_value)
+            if result["validated"]:
+                if result["active"]:
+                    self.console.print(f"[bold red][!] SECRET IS ACTIVE: {result['reason']}[/bold red]")
+                else:
+                    self.console.print(f"[green]Secret is not active: {result['reason']}[/green]")
+            else:
+                self.console.print(f"[yellow]Could not validate: {result['reason']}[/yellow]")

@@ -81,6 +81,26 @@ CREATE TABLE IF NOT EXISTS api_keys (
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     last_used   TEXT
 );
+
+CREATE TABLE IF NOT EXISTS targets (
+    id          TEXT    PRIMARY KEY,
+    name        TEXT    NOT NULL,
+    target      TEXT    NOT NULL,
+    project     TEXT    NOT NULL DEFAULT 'Default',
+    scope_notes TEXT    DEFAULT '',
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    user_id     INTEGER REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS auth_profiles (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL,
+    profile_type TEXT   NOT NULL DEFAULT 'bearer' CHECK(profile_type IN ('bearer','cookie','header','form')),
+    config      TEXT    NOT NULL DEFAULT '{}',
+    target_id   TEXT    REFERENCES targets(id) ON DELETE SET NULL,
+    user_id     INTEGER REFERENCES users(id),
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -339,6 +359,114 @@ class Database:
                 (datetime.utcnow().isoformat(), row["key_id"]),
             )
         return {"id": row["user_id"], "username": row["username"], "role": row["role"]}
+
+    # ------------------------------------------------------------------
+    # Targets
+    # ------------------------------------------------------------------
+
+    def create_target(self, target_id: str, name: str, target: str, project: str = "Default",
+                      scope_notes: str = "", user_id: int | None = None) -> dict:
+        """Create a saved target."""
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO targets (id, name, target, project, scope_notes, user_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (target_id, name, target, project, scope_notes, user_id),
+            )
+        return {
+            "id": target_id, "name": name, "target": target,
+            "project": project, "scope_notes": scope_notes,
+        }
+
+    def list_targets(self, user_id: int | None = None) -> list[dict]:
+        """List all targets, enriched with last scan date and finding count."""
+        with self._connect() as conn:
+            if user_id is not None:
+                rows = conn.execute(
+                    "SELECT * FROM targets WHERE user_id = ? ORDER BY created_at DESC",
+                    (user_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM targets ORDER BY created_at DESC"
+                ).fetchall()
+
+            results = []
+            for row in rows:
+                d = dict(row)
+                # Last scan
+                last = conn.execute(
+                    "SELECT created_at FROM scans WHERE target = ? ORDER BY created_at DESC LIMIT 1",
+                    (d["target"],),
+                ).fetchone()
+                d["last_scan_at"] = last["created_at"] if last else None
+                # Finding count
+                cnt = conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM findings f "
+                    "JOIN scans s ON f.scan_id = s.id WHERE s.target = ?",
+                    (d["target"],),
+                ).fetchone()
+                d["finding_count"] = cnt["cnt"] if cnt else 0
+                results.append(d)
+        return results
+
+    def get_target(self, target_id: str) -> dict | None:
+        """Get a single target."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM targets WHERE id = ?", (target_id,)).fetchone()
+        return dict(row) if row else None
+
+    def delete_target(self, target_id: str):
+        """Delete a target."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM targets WHERE id = ?", (target_id,))
+
+    # ------------------------------------------------------------------
+    # Auth Profiles
+    # ------------------------------------------------------------------
+
+    def create_auth_profile(self, name: str, profile_type: str, config: dict,
+                            target_id: str | None = None, user_id: int | None = None) -> dict:
+        """Create an authentication profile."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO auth_profiles (name, profile_type, config, target_id, user_id) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (name, profile_type, json.dumps(config), target_id, user_id),
+            )
+        return {"id": cur.lastrowid, "name": name, "profile_type": profile_type, "config": config}
+
+    def list_auth_profiles(self, user_id: int | None = None) -> list[dict]:
+        """List auth profiles."""
+        with self._connect() as conn:
+            if user_id is not None:
+                rows = conn.execute(
+                    "SELECT * FROM auth_profiles WHERE user_id = ? ORDER BY created_at DESC",
+                    (user_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM auth_profiles ORDER BY created_at DESC").fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            d["config"] = json.loads(d.get("config") or "{}")
+            results.append(d)
+        return results
+
+    def get_auth_profile(self, profile_id: int) -> dict | None:
+        """Get a single auth profile."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM auth_profiles WHERE id = ?", (profile_id,)).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["config"] = json.loads(d.get("config") or "{}")
+        return d
+
+    def delete_auth_profile(self, profile_id: int):
+        """Delete an auth profile."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM auth_profiles WHERE id = ?", (profile_id,))
 
     # ------------------------------------------------------------------
     # Statistics

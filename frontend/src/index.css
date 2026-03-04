@@ -45,3 +45,32 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-border-light);
 }
+
+/* Light theme overrides */
+.light-theme {
+  --color-bg-primary: #f8fafc;
+  --color-bg-secondary: #f1f5f9;
+  --color-bg-card: #ffffff;
+  --color-bg-hover: #e2e8f0;
+  --color-border: #cbd5e1;
+  --color-border-light: #e2e8f0;
+  --color-accent: #059669;
+  --color-accent-hover: #047857;
+  --color-accent-dim: #05966333;
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #475569;
+  --color-text-muted: #64748b;
+  --color-terminal-bg: #1e293b;
+}
+
+/* Fade-in animation for live findings */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

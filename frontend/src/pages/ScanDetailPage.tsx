@@ -9,6 +9,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import SeverityBadge from '../components/SeverityBadge';
+import FindingDrawer from '../components/FindingDrawer';
 import {
   getScan,
   getScanFindings,
@@ -66,20 +67,34 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function FindingRow({ finding }: { finding: Finding }) {
+function FindingRow({
+  finding,
+  onClickFinding,
+}: {
+  finding: Finding;
+  onClickFinding: (finding: Finding) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   return (
     <div className="border-b border-[var(--color-border)] last:border-b-0">
       <button
-        onClick={() => setExpanded((prev) => !prev)}
+        onClick={() => onClickFinding(finding)}
         className="flex w-full items-center gap-4 px-5 py-3 text-left transition-colors hover:bg-[var(--color-bg-hover)]"
       >
-        {expanded ? (
-          <ChevronDown className="h-4 w-4 shrink-0 text-[var(--color-text-muted)]" />
-        ) : (
-          <ChevronRight className="h-4 w-4 shrink-0 text-[var(--color-text-muted)]" />
-        )}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpanded((prev) => !prev);
+          }}
+          className="shrink-0 rounded p-0.5 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-secondary)]"
+        >
+          {expanded ? (
+            <ChevronDown className="h-4 w-4" />
+          ) : (
+            <ChevronRight className="h-4 w-4" />
+          )}
+        </button>
         <SeverityBadge severity={finding.severity} />
         <span className="flex-1 truncate text-sm font-medium text-[var(--color-text-primary)]">
           {finding.title}
@@ -138,6 +153,8 @@ export default function ScanDetailPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [severityFilter, setSeverityFilter] = useState<Severity | 'all'>('all');
   const [exporting, setExporting] = useState(false);
+  const [drawerFinding, setDrawerFinding] = useState<Finding | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -215,6 +232,16 @@ export default function ScanDetailPage() {
     }
 
     setExporting(false);
+  };
+
+  const handleFindingClick = (finding: Finding) => {
+    setDrawerFinding(finding);
+    setDrawerOpen(true);
+  };
+
+  const handleCloseDrawer = () => {
+    setDrawerOpen(false);
+    setTimeout(() => setDrawerFinding(null), 300);
   };
 
   if (loading) {
@@ -397,7 +424,11 @@ export default function ScanDetailPage() {
         {filteredFindings.length > 0 ? (
           <div>
             {filteredFindings.map((finding) => (
-              <FindingRow key={finding.id} finding={finding} />
+              <FindingRow
+                key={finding.id}
+                finding={finding}
+                onClickFinding={handleFindingClick}
+              />
             ))}
           </div>
         ) : (
@@ -408,6 +439,13 @@ export default function ScanDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Finding Detail Drawer */}
+      <FindingDrawer
+        finding={drawerFinding}
+        isOpen={drawerOpen}
+        onClose={handleCloseDrawer}
+      />
     </div>
   );
 }

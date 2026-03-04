@@ -19,6 +19,8 @@ from rich import box
 
 try:
     import dns.resolver
+    import dns.query
+    import dns.zone
     HAS_DNS = True
 except ImportError:
     HAS_DNS = False
@@ -400,6 +402,448 @@ class ReconModule:
             self.console.print("[yellow]No open ports found in scanned range.[/yellow]")
 
     # ------------------------------------------------------------------
+    # DNS Zone Transfer Testing
+    # ------------------------------------------------------------------
+    def dns_zone_transfer(self, domain: str):
+        """Attempt DNS zone transfer (AXFR) against the domain's nameservers."""
+        self.console.print(Panel(f"[bold]DNS Zone Transfer Test: {domain}[/bold]", border_style="cyan"))
+
+        if not HAS_DNS:
+            self.console.print("[yellow]dnspython not installed. Cannot test zone transfers.[/yellow]")
+            return
+
+        # Resolve nameservers for the domain
+        try:
+            ns_answers = dns.resolver.resolve(domain, "NS")
+            nameservers = [str(ns).rstrip(".") for ns in ns_answers]
+        except Exception as e:
+            self.console.print(f"[red]Failed to retrieve nameservers for {domain}: {e}[/red]")
+            return
+
+        if not nameservers:
+            self.console.print("[yellow]No nameservers found for domain.[/yellow]")
+            return
+
+        self.console.print(f"[dim]Found {len(nameservers)} nameserver(s): {', '.join(nameservers)}[/dim]")
+
+        transfer_successful = False
+
+        for ns in nameservers:
+            self.console.print(f"\n[dim]Attempting AXFR against {ns}...[/dim]")
+            try:
+                # Resolve the nameserver hostname to an IP
+                try:
+                    ns_ip = socket.gethostbyname(ns)
+                except socket.gaierror:
+                    self.console.print(f"  [yellow]Cannot resolve nameserver {ns}, skipping.[/yellow]")
+                    continue
+
+                zone = dns.zone.from_xfr(dns.query.xfr(ns_ip, domain, timeout=10))
+
+                # Zone transfer succeeded - this is a high-severity finding
+                transfer_successful = True
+                self.console.print(f"  [bold red][!] Zone transfer SUCCESSFUL against {ns} ({ns_ip})![/bold red]")
+                self._add_finding(
+                    "dns_zone_transfer",
+                    "axfr_vulnerable",
+                    f"Zone transfer succeeded on {ns} ({ns_ip}) - HIGH SEVERITY misconfiguration",
+                )
+
+                # Enumerate all records from the transferred zone
+                table = Table(title=f"Zone Transfer Records from {ns}", box=box.SIMPLE)
+                table.add_column("Name", style="cyan")
+                table.add_column("TTL", style="dim")
+                table.add_column("Type", style="yellow")
+                table.add_column("Data", style="white")
+
+                record_count = 0
+                for name, node in zone.nodes.items():
+                    for rdataset in node.rdatasets:
+                        for rdata in rdataset:
+                            record_name = str(name)
+                            record_type = dns.rdatatype.to_text(rdataset.rdtype)
+                            record_data = str(rdata)
+                            table.add_row(record_name, str(rdataset.ttl), record_type, record_data)
+                            self._add_finding("dns_zone_transfer", f"{record_type}:{record_name}", record_data)
+                            record_count += 1
+
+                self.console.print(table)
+                self.console.print(
+                    f"[bold red][!] {record_count} records exposed via zone transfer. "
+                    f"This is a HIGH severity misconfiguration![/bold red]"
+                )
+
+            except dns.exception.FormError:
+                self.console.print(f"  [green][+] {ns}: Zone transfer refused (properly configured).[/green]")
+            except dns.query.TransferError:
+                self.console.print(f"  [green][+] {ns}: Zone transfer denied (properly configured).[/green]")
+            except EOFError:
+                self.console.print(f"  [green][+] {ns}: Connection closed - transfer not allowed.[/green]")
+            except ConnectionRefusedError:
+                self.console.print(f"  [yellow]{ns}: Connection refused.[/yellow]")
+            except socket.timeout:
+                self.console.print(f"  [yellow]{ns}: Connection timed out.[/yellow]")
+            except Exception as e:
+                self.console.print(f"  [yellow]{ns}: Zone transfer failed: {e}[/yellow]")
+
+        if not transfer_successful:
+            self.console.print(
+                "\n[green][+] All nameservers properly restrict zone transfers.[/green]"
+            )
+            self._add_finding("dns_zone_transfer", "axfr_status", "All nameservers properly restrict zone transfers")
+
+    # ------------------------------------------------------------------
+    # Virtual Host Discovery
+    # ------------------------------------------------------------------
+    def vhost_discovery(self, target: str):
+        """Discover virtual hosts by sending requests with various Host headers."""
+        self.console.print(Panel(f"[bold]Virtual Host Discovery: {target}[/bold]", border_style="cyan"))
+
+        # Extract domain from target
+        domain = target.replace("https://", "").replace("http://", "").split("/")[0]
+
+        # Resolve target IP
+        try:
+            target_ip = socket.gethostbyname(domain)
+        except socket.gaierror as e:
+            self.console.print(f"[red]Cannot resolve {domain}: {e}[/red]")
+            return
+
+        self.console.print(f"[dim]Target IP: {target_ip}[/dim]")
+
+        # Common vhost name prefixes
+        vhost_names = [
+            "www", "mail", "admin", "dev", "staging", "test", "api", "app",
+            "portal", "cms", "blog", "shop", "store", "intranet", "vpn",
+            "git", "gitlab", "jenkins", "jira", "confluence",
+        ]
+
+        # Get baseline response by requesting with the original domain
+        baseline_url = f"http://{target_ip}"
+        try:
+            baseline_resp = requests.get(
+                baseline_url,
+                headers={"Host": domain},
+                timeout=10,
+                allow_redirects=False,
+                verify=False,
+            )
+            baseline_status = baseline_resp.status_code
+            baseline_length = len(baseline_resp.text)
+            # Extract title from baseline
+            baseline_title = ""
+            title_match = re.search(r"<title>(.*?)</title>", baseline_resp.text, re.IGNORECASE | re.DOTALL)
+            if title_match:
+                baseline_title = title_match.group(1).strip()
+        except requests.RequestException as e:
+            self.console.print(f"[red]Failed to get baseline response: {e}[/red]")
+            return
+
+        self.console.print(
+            f"[dim]Baseline: status={baseline_status}, length={baseline_length}, "
+            f"title=\"{baseline_title}\"[/dim]\n"
+        )
+
+        discovered = []
+
+        for name in vhost_names:
+            vhost = f"{name}.{domain}"
+            try:
+                resp = requests.get(
+                    baseline_url,
+                    headers={"Host": vhost},
+                    timeout=10,
+                    allow_redirects=False,
+                    verify=False,
+                )
+
+                resp_status = resp.status_code
+                resp_length = len(resp.text)
+                resp_title = ""
+                title_match = re.search(r"<title>(.*?)</title>", resp.text, re.IGNORECASE | re.DOTALL)
+                if title_match:
+                    resp_title = title_match.group(1).strip()
+
+                # Check if response differs significantly from baseline
+                status_differs = resp_status != baseline_status
+                # Allow ~10% length variance to account for dynamic content
+                length_threshold = max(100, baseline_length * 0.1)
+                length_differs = abs(resp_length - baseline_length) > length_threshold
+                title_differs = resp_title != baseline_title and resp_title != ""
+
+                if status_differs or length_differs or title_differs:
+                    reason_parts = []
+                    if status_differs:
+                        reason_parts.append(f"status: {resp_status} vs {baseline_status}")
+                    if length_differs:
+                        reason_parts.append(f"length: {resp_length} vs {baseline_length}")
+                    if title_differs:
+                        reason_parts.append(f"title: \"{resp_title}\"")
+                    reason = "; ".join(reason_parts)
+
+                    discovered.append({
+                        "vhost": vhost,
+                        "status": resp_status,
+                        "length": resp_length,
+                        "title": resp_title,
+                        "reason": reason,
+                    })
+
+            except requests.RequestException:
+                continue
+            except Exception:
+                continue
+
+        # Display results
+        if discovered:
+            table = Table(title=f"Discovered Virtual Hosts ({len(discovered)} found)", box=box.SIMPLE)
+            table.add_column("Virtual Host", style="green")
+            table.add_column("Status", style="yellow")
+            table.add_column("Length", style="dim")
+            table.add_column("Title", style="cyan")
+            table.add_column("Reason", style="white")
+
+            for entry in discovered:
+                table.add_row(
+                    entry["vhost"],
+                    str(entry["status"]),
+                    str(entry["length"]),
+                    entry["title"],
+                    entry["reason"],
+                )
+                self._add_finding("vhost", entry["vhost"], entry["reason"])
+
+            self.console.print(table)
+        else:
+            self.console.print("[yellow]No additional virtual hosts discovered.[/yellow]")
+
+    # ------------------------------------------------------------------
+    # WAF Detection and Fingerprinting
+    # ------------------------------------------------------------------
+    def waf_detection(self, target: str):
+        """Detect and fingerprint Web Application Firewalls (WAF)."""
+        if not target.startswith("http"):
+            target = f"https://{target}"
+
+        self.console.print(Panel(f"[bold]WAF Detection: {target}[/bold]", border_style="cyan"))
+
+        # Step 1: Send a normal request for baseline
+        try:
+            baseline_resp = requests.get(target, timeout=15, allow_redirects=True, verify=True)
+            baseline_status = baseline_resp.status_code
+            baseline_headers = {k.lower(): v for k, v in baseline_resp.headers.items()}
+            baseline_body = baseline_resp.text
+        except requests.RequestException as e:
+            self.console.print(f"[red]Baseline request failed: {e}[/red]")
+            return
+
+        self.console.print(f"[dim]Baseline response: status={baseline_status}[/dim]")
+
+        # Step 2: Send a request with a known-malicious payload to trigger WAF
+        malicious_payloads = [
+            ("?test=<script>alert(1)</script>", "XSS payload"),
+            ("?test=' OR 1=1 --", "SQL injection payload"),
+            ("?test=../../etc/passwd", "Path traversal payload"),
+        ]
+
+        waf_triggered = False
+        trigger_status = None
+        trigger_headers = {}
+        trigger_body = ""
+        trigger_cookies = ""
+
+        for payload, desc in malicious_payloads:
+            try:
+                malicious_url = target.rstrip("/") + "/" + payload
+                mal_resp = requests.get(
+                    malicious_url,
+                    timeout=15,
+                    allow_redirects=True,
+                    verify=True,
+                )
+                mal_status = mal_resp.status_code
+                mal_headers = {k.lower(): v for k, v in mal_resp.headers.items()}
+                mal_body = mal_resp.text
+                mal_cookies = "; ".join(
+                    [f"{c.name}={c.value}" for c in mal_resp.cookies]
+                )
+
+                # Check if response differs indicating WAF presence
+                if mal_status in (403, 406, 429, 501, 503) and mal_status != baseline_status:
+                    waf_triggered = True
+                    trigger_status = mal_status
+                    trigger_headers = mal_headers
+                    trigger_body = mal_body
+                    trigger_cookies = mal_cookies
+                    self.console.print(
+                        f"[yellow][!] WAF detected: {desc} triggered status {mal_status} "
+                        f"(baseline was {baseline_status})[/yellow]"
+                    )
+                    break
+                elif mal_status != baseline_status:
+                    waf_triggered = True
+                    trigger_status = mal_status
+                    trigger_headers = mal_headers
+                    trigger_body = mal_body
+                    trigger_cookies = mal_cookies
+
+            except requests.RequestException:
+                continue
+            except Exception:
+                continue
+
+        # Combine headers/body from both responses for fingerprinting
+        all_headers = {**baseline_headers}
+        all_body = baseline_body
+        all_cookies = "; ".join(
+            [f"{c.name}={c.value}" for c in baseline_resp.cookies]
+        )
+        if waf_triggered:
+            all_headers.update(trigger_headers)
+            all_body += trigger_body
+            all_cookies += trigger_cookies
+
+        # Step 3: Fingerprint the WAF
+        waf_signatures = {
+            "Cloudflare": {
+                "headers": ["cf-ray", "cf-cache-status"],
+                "cookies": ["__cfduid", "__cf_bm"],
+                "body": ["attention required", "cloudflare", "ray id"],
+                "server": ["cloudflare"],
+            },
+            "AWS WAF": {
+                "headers": ["x-amzn-requestid", "x-amzn-trace-id"],
+                "cookies": [],
+                "body": [],
+                "server": [],
+            },
+            "Akamai": {
+                "headers": ["x-akamai-transformed", "akamai"],
+                "cookies": [],
+                "body": ["akamai"],
+                "server": ["akamaighost"],
+            },
+            "Imperva / Incapsula": {
+                "headers": ["x-cdn"],
+                "cookies": ["incap_ses", "visid_incap", "nlbi_"],
+                "body": ["incapsula", "imperva"],
+                "server": [],
+            },
+            "Sucuri": {
+                "headers": ["x-sucuri-id", "x-sucuri-cache"],
+                "cookies": [],
+                "body": ["sucuri", "access denied - sucuri"],
+                "server": ["sucuri"],
+            },
+            "F5 BIG-IP": {
+                "headers": ["x-wa-info"],
+                "cookies": ["bigip", "bigipserver"],
+                "body": [],
+                "server": ["big-ip", "bigip"],
+            },
+            "ModSecurity": {
+                "headers": [],
+                "cookies": [],
+                "body": ["modsecurity", "mod_security"],
+                "server": ["mod_security", "modsecurity", "noyb"],
+            },
+            "Barracuda": {
+                "headers": [],
+                "cookies": ["barra_counter_session"],
+                "body": ["barracuda"],
+                "server": ["barracuda"],
+            },
+        }
+
+        detected_wafs = []
+
+        for waf_name, signatures in waf_signatures.items():
+            confidence_score = 0
+            matches = []
+
+            # Check headers
+            for sig_header in signatures["headers"]:
+                if sig_header in all_headers:
+                    confidence_score += 30
+                    matches.append(f"header: {sig_header}")
+
+            # Check cookies
+            all_cookies_lower = all_cookies.lower()
+            for sig_cookie in signatures["cookies"]:
+                if sig_cookie.lower() in all_cookies_lower:
+                    confidence_score += 25
+                    matches.append(f"cookie: {sig_cookie}")
+
+            # Check body patterns
+            body_lower = all_body.lower()
+            for sig_body in signatures["body"]:
+                if sig_body.lower() in body_lower:
+                    confidence_score += 20
+                    matches.append(f"body: \"{sig_body}\"")
+
+            # Check server header
+            server_header = all_headers.get("server", "").lower()
+            for sig_server in signatures["server"]:
+                if sig_server.lower() in server_header:
+                    confidence_score += 35
+                    matches.append(f"server: \"{sig_server}\"")
+
+            if confidence_score > 0:
+                detected_wafs.append({
+                    "name": waf_name,
+                    "confidence": min(confidence_score, 100),
+                    "matches": matches,
+                })
+
+        # Display results
+        if detected_wafs:
+            # Sort by confidence
+            detected_wafs.sort(key=lambda x: x["confidence"], reverse=True)
+
+            table = Table(title="WAF Detection Results", box=box.SIMPLE)
+            table.add_column("WAF", style="yellow")
+            table.add_column("Confidence", style="cyan")
+            table.add_column("Evidence", style="white")
+
+            for waf in detected_wafs:
+                confidence_str = f"{waf['confidence']}%"
+                if waf["confidence"] >= 70:
+                    confidence_style = "[bold green]"
+                elif waf["confidence"] >= 40:
+                    confidence_style = "[yellow]"
+                else:
+                    confidence_style = "[dim]"
+
+                table.add_row(
+                    waf["name"],
+                    f"{confidence_style}{confidence_str}[/]",
+                    ", ".join(waf["matches"]),
+                )
+                self._add_finding(
+                    "waf",
+                    waf["name"],
+                    f"Confidence: {waf['confidence']}% | Evidence: {', '.join(waf['matches'])}",
+                )
+
+            self.console.print(table)
+
+            if waf_triggered:
+                self.console.print(
+                    f"\n[yellow][!] WAF actively blocking malicious payloads "
+                    f"(trigger status: {trigger_status})[/yellow]"
+                )
+        else:
+            if waf_triggered:
+                self.console.print(
+                    f"[yellow][!] A WAF appears to be present (malicious request returned "
+                    f"status {trigger_status}) but could not be fingerprinted.[/yellow]"
+                )
+                self._add_finding("waf", "unknown", f"WAF detected but unidentified (status {trigger_status})")
+            else:
+                self.console.print("[green][+] No WAF detected. Responses to normal and malicious requests are similar.[/green]")
+                self._add_finding("waf", "status", "No WAF detected")
+
+    # ------------------------------------------------------------------
     # Run all recon
     # ------------------------------------------------------------------
     def run(self, target: str, passive_only: bool = False):
@@ -415,6 +859,9 @@ class ReconModule:
 
         if not passive_only:
             self.port_scan(domain)
+            self.waf_detection(target)
+            self.vhost_discovery(domain)
+            self.dns_zone_transfer(domain)
 
         self.console.print(f"\n[bold green]Recon complete. {len(self.findings)} findings collected.[/bold green]")
         return self.findings
@@ -437,12 +884,18 @@ class ReconModule:
         table.add_row("5", "WHOIS Lookup")
         table.add_row("6", "Technology Detection")
         table.add_row("7", "Port Scan (top ports)")
-        table.add_row("8", "Run ALL Recon")
+        table.add_row("8", "DNS Zone Transfer Test")
+        table.add_row("9", "Virtual Host Discovery")
+        table.add_row("10", "WAF Detection")
+        table.add_row("11", "Run ALL Recon")
         table.add_row("0", "Back to main menu")
 
         self.console.print(table)
 
-        choice = Prompt.ask("Select", choices=["0", "1", "2", "3", "4", "5", "6", "7", "8"])
+        choice = Prompt.ask(
+            "Select",
+            choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"],
+        )
 
         actions = {
             "1": lambda: self.dns_lookup(domain),
@@ -452,7 +905,10 @@ class ReconModule:
             "5": lambda: self.whois_lookup(domain),
             "6": lambda: self.tech_detect(target),
             "7": lambda: self.port_scan(domain),
-            "8": lambda: self.run(target),
+            "8": lambda: self.dns_zone_transfer(domain),
+            "9": lambda: self.vhost_discovery(domain),
+            "10": lambda: self.waf_detection(target),
+            "11": lambda: self.run(target),
         }
 
         action = actions.get(choice)

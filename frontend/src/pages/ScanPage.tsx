@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { startScan, type Scan } from '../lib/api';
 import Terminal from '../components/Terminal';
+import LiveFindingsFeed from '../components/LiveFindingsFeed';
 
 interface ScanTypeOption {
   id: string;
@@ -183,8 +184,18 @@ export default function ScanPage() {
           </div>
         </div>
 
-        {/* Terminal */}
-        <Terminal scanId={activeScan.id} />
+        {/* Terminal + Live Findings Split */}
+        <div className="flex gap-4" style={{ minHeight: '460px' }}>
+          {/* Terminal - 60% */}
+          <div className="w-[60%] min-w-0">
+            <Terminal scanId={activeScan.id} />
+          </div>
+
+          {/* Live Findings Feed - 40% */}
+          <div className="w-[40%] min-w-0">
+            <LiveFindingsFeed scanId={activeScan.id} />
+          </div>
+        </div>
       </div>
     );
   }

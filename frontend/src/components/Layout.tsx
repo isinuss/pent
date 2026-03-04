@@ -9,11 +9,14 @@ import {
   Menu,
   X,
   Shield,
+  Target,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import ThemeToggle from './ThemeToggle';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/targets', icon: Target, label: 'Targets' },
   { to: '/scan', icon: Crosshair, label: 'New Scan' },
   { to: '/results', icon: List, label: 'Results' },
   { to: '/guides', icon: BookOpen, label: 'Guides' },
@@ -104,6 +107,7 @@ export default function Layout() {
                 {user?.role || 'operator'}
               </p>
             </div>
+            <ThemeToggle />
             <button
               onClick={handleLogout}
               className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-severity-critical)] hover:bg-[var(--color-bg-hover)] transition-colors"

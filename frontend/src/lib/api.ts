@@ -66,6 +66,17 @@ export interface Guide {
   content: string;
 }
 
+export interface Target {
+  id: string;
+  name: string;
+  target: string;
+  project: string;
+  scope_notes: string;
+  created_at: string;
+  last_scan_at: string | null;
+  finding_count: number;
+}
+
 let authToken: string | null = localStorage.getItem('pent_token');
 
 export function setToken(token: string | null): void {
@@ -201,4 +212,17 @@ export async function exportScanReport(
   } catch {
     return null;
   }
+}
+
+// Targets
+export async function getTargets(): Promise<ApiResponse<Target[]>> {
+  return request<Target[]>('/targets');
+}
+
+export async function createTarget(data: { name: string; target: string; project: string; scope_notes?: string }): Promise<ApiResponse<Target>> {
+  return request<Target>('/targets', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function deleteTarget(id: string): Promise<ApiResponse<void>> {
+  return request<void>(`/targets/${id}`, { method: 'DELETE' });
 }

@@ -151,7 +151,11 @@ def _err(message: str, status: int = 400):
 # ---------------------------------------------------------------------------
 
 class WebConsole(Console):
-    """Console that captures output and sends it to the browser via WebSocket."""
+    """Console that captures output and sends it to the browser via WebSocket.
+
+    Also intercepts _add_finding calls (patched onto modules) to emit
+    live ``scan_finding`` events so the UI can display findings in real time.
+    """
 
     def __init__(self, scan_id: str):
         self._buffer = StringIO()
@@ -162,6 +166,7 @@ class WebConsole(Console):
             color_system="truecolor",
         )
         self.scan_id = scan_id
+        self._finding_count = 0
 
     def print(self, *args, **kwargs):
         self._buffer.truncate(0)
@@ -174,10 +179,60 @@ class WebConsole(Console):
                 "text": text,
             })
 
+    def emit_finding(self, finding: dict):
+        """Emit a single finding to the browser in real-time."""
+        self._finding_count += 1
+        socketio.emit("scan_finding", {
+            "scan_id": self.scan_id,
+            "finding": finding,
+            "index": self._finding_count,
+        })
+
 
 # ---------------------------------------------------------------------------
 # Background scan runner
 # ---------------------------------------------------------------------------
+
+def _apply_auth_profile(session, profile: dict):
+    """Apply an authentication profile to a requests.Session."""
+    ptype = profile.get("profile_type", "")
+    config = profile.get("config", {})
+
+    if ptype == "bearer":
+        token = config.get("token", "")
+        if token:
+            session.headers["Authorization"] = f"Bearer {token}"
+    elif ptype == "cookie":
+        for name, value in config.get("cookies", {}).items():
+            session.cookies.set(name, value)
+    elif ptype == "header":
+        for name, value in config.get("headers", {}).items():
+            session.headers[name] = value
+    elif ptype == "form":
+        # Form-based login: post credentials to login URL, session will capture cookies
+        login_url = config.get("login_url", "")
+        form_data = config.get("form_data", {})
+        if login_url and form_data:
+            try:
+                session.post(login_url, data=form_data, timeout=15, allow_redirects=True)
+            except Exception:
+                pass
+
+
+def _patch_module_findings(module, web_console: 'WebConsole'):
+    """Monkey-patch a module's _add_finding to also emit live findings via WebSocket."""
+    original = getattr(module, '_add_finding', None)
+    if original is None:
+        return
+
+    def patched(*args, **kwargs):
+        original(*args, **kwargs)
+        # The finding was appended to module.findings — grab the last one
+        if hasattr(module, 'findings') and module.findings:
+            web_console.emit_finding(module.findings[-1])
+
+    module._add_finding = patched
+
 
 def run_scan_thread(scan_id: str, scan_type: str, target: str, options: dict):
     """Run a scan in a background thread, streaming output via WebSocket
@@ -202,32 +257,45 @@ def run_scan_thread(scan_id: str, scan_type: str, target: str, options: dict):
 
         if scan_type == "recon":
             mod = ReconModule(console)
+            _patch_module_findings(mod, console)
             passive = options.get("passive", False)
             findings = mod.run(target, passive_only=passive)
 
         elif scan_type == "vuln_scan":
             mod = VulnScannerModule(console)
+            _patch_module_findings(mod, console)
             quick = options.get("quick", True)
             findings = mod.run(target, quick=quick)
 
         elif scan_type == "web_test":
             mod = WebTesterModule(console)
+            _patch_module_findings(mod, console)
             full = options.get("full", False)
+            # Apply auth profile if provided
+            auth_profile_id = options.get("auth_profile_id")
+            if auth_profile_id:
+                profile = db.get_auth_profile(int(auth_profile_id))
+                if profile:
+                    _apply_auth_profile(mod.session, profile)
             findings = mod.run(url, full=full)
 
         elif scan_type == "js_analyze":
             mod = JSAnalyzerModule(console)
+            _patch_module_findings(mod, console)
             findings = mod.analyze(url)
 
         elif scan_type == "takeover":
             recon_mod = ReconModule(console)
+            _patch_module_findings(recon_mod, console)
             subs = recon_mod.subdomain_enum(domain)
             if subs:
                 mod = TakeoverModule(console)
+                _patch_module_findings(mod, console)
                 findings = mod.check_subdomains(subs[:50])
 
         elif scan_type == "checks":
             mod = CustomChecksModule(console)
+            _patch_module_findings(mod, console)
             findings = mod.run_all_builtin(target)
 
         elif scan_type == "full_auto":
@@ -577,6 +645,108 @@ def api_v1_create_api_key():
     user = g.current_user
     key_info = db.create_api_key(user["id"], name)
     return _ok(key_info), 201
+
+
+# ------------------------------------------------------------------
+# Target endpoints  (require auth)
+# ------------------------------------------------------------------
+
+@app.route("/api/v1/targets", methods=["GET"])
+@rate_limit(limit=100)
+@require_auth()
+def api_v1_list_targets():
+    """List saved targets."""
+    user = g.current_user
+    uid = None if user["role"] == "admin" else user["id"]
+    return _ok(db.list_targets(user_id=uid))
+
+
+@app.route("/api/v1/targets", methods=["POST"])
+@rate_limit(limit=100)
+@require_auth(roles=["admin", "tester"])
+def api_v1_create_target():
+    """Create a saved target."""
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    target_str = data.get("target", "").strip()
+    project = data.get("project", "Default").strip()
+    scope_notes = data.get("scope_notes", "")
+
+    if not name or not target_str:
+        return _err("Name and target are required")
+
+    target_id = str(uuid.uuid4())[:8]
+    result = db.create_target(target_id, name, target_str, project, scope_notes, g.current_user["id"])
+    return _ok(result), 201
+
+
+@app.route("/api/v1/targets/<target_id>", methods=["GET"])
+@rate_limit(limit=100)
+@require_auth()
+def api_v1_get_target(target_id):
+    """Get a single target."""
+    t = db.get_target(target_id)
+    if t is None:
+        return _err("Target not found", 404)
+    return _ok(t)
+
+
+@app.route("/api/v1/targets/<target_id>", methods=["DELETE"])
+@rate_limit(limit=100)
+@require_auth(roles=["admin", "tester"])
+def api_v1_delete_target(target_id):
+    """Delete a saved target."""
+    t = db.get_target(target_id)
+    if t is None:
+        return _err("Target not found", 404)
+    db.delete_target(target_id)
+    return _ok({"deleted": True})
+
+
+# ------------------------------------------------------------------
+# Auth Profile endpoints  (require auth)
+# ------------------------------------------------------------------
+
+@app.route("/api/v1/auth-profiles", methods=["GET"])
+@rate_limit(limit=100)
+@require_auth()
+def api_v1_list_auth_profiles():
+    """List auth profiles."""
+    user = g.current_user
+    uid = None if user["role"] == "admin" else user["id"]
+    return _ok(db.list_auth_profiles(user_id=uid))
+
+
+@app.route("/api/v1/auth-profiles", methods=["POST"])
+@rate_limit(limit=100)
+@require_auth(roles=["admin", "tester"])
+def api_v1_create_auth_profile():
+    """Create an auth profile (bearer, cookie, header, form)."""
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    profile_type = data.get("profile_type", "bearer")
+    config = data.get("config", {})
+    target_id = data.get("target_id")
+
+    if not name:
+        return _err("Name is required")
+    if profile_type not in ("bearer", "cookie", "header", "form"):
+        return _err("Invalid profile_type")
+
+    result = db.create_auth_profile(name, profile_type, config, target_id, g.current_user["id"])
+    return _ok(result), 201
+
+
+@app.route("/api/v1/auth-profiles/<int:profile_id>", methods=["DELETE"])
+@rate_limit(limit=100)
+@require_auth(roles=["admin", "tester"])
+def api_v1_delete_auth_profile(profile_id):
+    """Delete an auth profile."""
+    p = db.get_auth_profile(profile_id)
+    if p is None:
+        return _err("Profile not found", 404)
+    db.delete_auth_profile(profile_id)
+    return _ok({"deleted": True})
 
 
 # ===================================================================

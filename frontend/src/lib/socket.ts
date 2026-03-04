@@ -75,6 +75,14 @@ export function subscribeScan(
   };
 }
 
+export function onScanFinding(callback: (data: { scan_id: string; finding: any }) => void): () => void {
+  const s = getSocket();
+  s.on('scan_finding', callback);
+  return () => {
+    s.off('scan_finding', callback);
+  };
+}
+
 export function disconnectSocket(): void {
   if (socket) {
     socket.disconnect();
