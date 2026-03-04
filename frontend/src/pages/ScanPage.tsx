@@ -30,19 +30,19 @@ const scanTypes: ScanTypeOption[] = [
     icon: Search,
   },
   {
-    id: 'vuln',
+    id: 'vuln_scan',
     label: 'Vuln Scan',
     description: 'Vulnerability scanning with CVE identification',
     icon: Shield,
   },
   {
-    id: 'web',
+    id: 'web_test',
     label: 'Web Test',
     description: 'Web application security testing and fuzzing',
     icon: Globe,
   },
   {
-    id: 'js',
+    id: 'js_analyze',
     label: 'JS Analyze',
     description: 'JavaScript source analysis for secrets and endpoints',
     icon: Code,
@@ -60,7 +60,7 @@ const scanTypes: ScanTypeOption[] = [
     icon: CheckCircle,
   },
   {
-    id: 'full',
+    id: 'full_auto',
     label: 'Full Auto',
     description: 'Run all scan types automatically in sequence',
     icon: Zap,
@@ -76,15 +76,15 @@ const typeOptions: ScanTypeOptionsMap = {
     { key: 'passive', label: 'Passive only (no active probing)', type: 'boolean', default: false },
     { key: 'deep', label: 'Deep enumeration', type: 'boolean', default: false },
   ],
-  vuln: [
+  vuln_scan: [
     { key: 'quick', label: 'Quick scan (top ports only)', type: 'boolean', default: false },
     { key: 'aggressive', label: 'Aggressive mode', type: 'boolean', default: false },
   ],
-  web: [
+  web_test: [
     { key: 'crawl', label: 'Enable crawling', type: 'boolean', default: true },
     { key: 'fuzz', label: 'Enable fuzzing', type: 'boolean', default: false },
   ],
-  js: [
+  js_analyze: [
     { key: 'recursive', label: 'Recursive analysis', type: 'boolean', default: false },
   ],
   takeover: [
@@ -94,7 +94,7 @@ const typeOptions: ScanTypeOptionsMap = {
     { key: 'headers', label: 'Security headers', type: 'boolean', default: true },
     { key: 'ssl', label: 'SSL/TLS analysis', type: 'boolean', default: true },
   ],
-  full: [
+  full_auto: [
     { key: 'skip_js', label: 'Skip JS analysis', type: 'boolean', default: false },
     { key: 'quick', label: 'Quick mode', type: 'boolean', default: false },
   ],
