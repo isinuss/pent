@@ -352,19 +352,77 @@ class ReconModule:
     # ------------------------------------------------------------------
     # Port scanning (top ports)
     # ------------------------------------------------------------------
-    def port_scan(self, target: str, top_ports: int = 100):
-        """Scan common ports using socket connections."""
-        self.console.print(Panel(f"[bold]Port Scan: {target} (top {top_ports})[/bold]", border_style="cyan"))
+    def _grab_banner(self, ip: str, port: int, service: str, timeout: float = 3.0) -> str:
+        """Grab service banner from an open port."""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            sock.connect((ip, port))
 
-        # Common ports to check
+            # HTTP-based services: send GET request
+            if service in ("HTTP", "HTTP-Alt", "HTTP-Alt2", "HTTPS", "HTTPS-Alt"):
+                sock.sendall(b"HEAD / HTTP/1.0\r\nHost: " + ip.encode() + b"\r\n\r\n")
+            elif service == "SMTP":
+                pass  # SMTP sends banner on connect
+            elif service == "FTP":
+                pass  # FTP sends banner on connect
+            elif service == "SSH":
+                pass  # SSH sends banner on connect
+            else:
+                sock.sendall(b"\r\n")
+
+            banner = sock.recv(1024).decode("utf-8", errors="replace").strip()
+            sock.close()
+            # Truncate and clean
+            banner = banner.split("\n")[0][:120].strip()
+            return banner
+        except Exception:
+            return ""
+
+    def _detect_service_version(self, banner: str, service: str) -> str:
+        """Extract version info from a service banner."""
+        if not banner:
+            return ""
+
+        # SSH: OpenSSH_8.9p1 Ubuntu-3
+        if "SSH" in banner.upper() or "ssh" in banner.lower():
+            return banner.split("\r")[0].strip()
+
+        # HTTP: Server header
+        for line in banner.split("\r\n"):
+            if line.lower().startswith("server:"):
+                return line.split(":", 1)[1].strip()
+
+        # FTP/SMTP/etc: first line is usually the banner
+        if service in ("FTP", "SMTP", "POP3", "IMAP"):
+            return banner[:100]
+
+        return banner[:80]
+
+    def port_scan(self, target: str, top_ports: int = 200):
+        """Enhanced port scan with banner grabbing, service detection, and concurrent scanning."""
+        import concurrent.futures
+
+        self.console.print(Panel(f"[bold]Port Scan: {target} (top {top_ports} ports)[/bold]", border_style="cyan"))
+
+        # Extended port list with services
         common_ports = {
             21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS",
             80: "HTTP", 110: "POP3", 111: "RPCbind", 135: "MSRPC",
-            139: "NetBIOS", 143: "IMAP", 443: "HTTPS", 445: "SMB",
-            993: "IMAPS", 995: "POP3S", 1723: "PPTP", 3306: "MySQL",
-            3389: "RDP", 5432: "PostgreSQL", 5900: "VNC", 6379: "Redis",
-            8080: "HTTP-Alt", 8443: "HTTPS-Alt", 8888: "HTTP-Alt2",
-            27017: "MongoDB", 9200: "Elasticsearch",
+            139: "NetBIOS", 143: "IMAP", 161: "SNMP", 443: "HTTPS",
+            445: "SMB", 465: "SMTPS", 514: "Syslog", 587: "SMTP-Sub",
+            636: "LDAPS", 993: "IMAPS", 995: "POP3S", 1080: "SOCKS",
+            1433: "MSSQL", 1434: "MSSQL-UDP", 1521: "Oracle",
+            1723: "PPTP", 2049: "NFS", 2181: "ZooKeeper",
+            2375: "Docker", 2376: "Docker-TLS", 3000: "Grafana",
+            3306: "MySQL", 3389: "RDP", 4443: "HTTPS-Alt",
+            5000: "Flask/Gunicorn", 5432: "PostgreSQL", 5672: "RabbitMQ",
+            5900: "VNC", 5984: "CouchDB", 6379: "Redis", 6443: "K8s-API",
+            7001: "WebLogic", 8000: "HTTP-Dev", 8080: "HTTP-Alt",
+            8443: "HTTPS-Alt", 8888: "HTTP-Alt2", 9000: "SonarQube",
+            9090: "Prometheus", 9200: "Elasticsearch", 9300: "ES-Transport",
+            9418: "Git", 11211: "Memcached", 15672: "RabbitMQ-Mgmt",
+            27017: "MongoDB", 27018: "MongoDB-Shard", 50000: "Jenkins",
         }
 
         try:
@@ -373,33 +431,99 @@ class ReconModule:
             self.console.print(f"[red]Cannot resolve {target}[/red]")
             return
 
-        self.console.print(f"[dim]Scanning {ip}...[/dim]")
+        self.console.print(f"[dim]Target IP: {ip}[/dim]")
+        self.console.print(f"[dim]Scanning {min(top_ports, len(common_ports))} ports with concurrent workers...[/dim]")
 
-        open_ports = []
         ports_to_scan = list(common_ports.keys())[:top_ports]
+        open_ports = []
 
-        for port in ports_to_scan:
+        def scan_port(port):
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1)
+                sock.settimeout(1.5)
                 result = sock.connect_ex((ip, port))
-                if result == 0:
-                    service = common_ports.get(port, "unknown")
-                    open_ports.append((port, service))
                 sock.close()
+                if result == 0:
+                    return port
             except Exception:
                 pass
+            return None
 
-        if open_ports:
-            table = Table(title="Open Ports", box=box.SIMPLE)
-            table.add_column("Port", style="yellow")
-            table.add_column("Service", style="green")
-            for port, service in open_ports:
-                table.add_row(str(port), service)
-                self._add_finding("port", str(port), service)
-            self.console.print(table)
-        else:
+        # Concurrent port scanning (20 workers)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            futures = {executor.submit(scan_port, p): p for p in ports_to_scan}
+            for future in concurrent.futures.as_completed(futures):
+                port = future.result()
+                if port is not None:
+                    open_ports.append(port)
+
+        open_ports.sort()
+
+        if not open_ports:
             self.console.print("[yellow]No open ports found in scanned range.[/yellow]")
+            self._add_finding("port", "scan_result", "No open ports found")
+            return
+
+        self.console.print(f"\n[bold green]{len(open_ports)} open port(s) found.[/bold green]")
+        self.console.print("[dim]Grabbing banners and detecting services...[/dim]\n")
+
+        # Banner grabbing for each open port
+        results = []
+        for port in open_ports:
+            service = common_ports.get(port, "unknown")
+            banner = self._grab_banner(ip, port, service)
+            version = self._detect_service_version(banner, service)
+            results.append((port, service, version, banner))
+
+        # Display results table
+        table = Table(title=f"Open Ports on {target} ({ip})", box=box.SIMPLE)
+        table.add_column("Port", style="yellow", width=8)
+        table.add_column("State", style="green", width=6)
+        table.add_column("Service", style="cyan", width=16)
+        table.add_column("Version / Banner", style="white", max_width=60)
+
+        for port, service, version, banner in results:
+            display_info = version or banner or "-"
+            table.add_row(str(port), "open", service, display_info)
+
+            # Create detailed finding
+            detail_parts = [f"Port {port}/{service} is open on {ip}"]
+            if version:
+                detail_parts.append(f"Version: {version}")
+            if banner and banner != version:
+                detail_parts.append(f"Banner: {banner}")
+
+            severity = "info"
+            # Flag risky services
+            risky_services = {
+                "Telnet": "high", "FTP": "medium", "SNMP": "medium",
+                "Docker": "high", "Redis": "medium", "MongoDB": "medium",
+                "Memcached": "medium", "Elasticsearch": "medium",
+                "VNC": "medium", "RDP": "low", "K8s-API": "high",
+            }
+            if service in risky_services:
+                severity = risky_services[service]
+                detail_parts.append(f"WARNING: {service} exposed to network")
+
+            self._add_finding("port", f"Open port {port}/{service}",
+                              " | ".join(detail_parts))
+            # Override severity for the finding (recon module uses category/key/value)
+            if self.findings:
+                self.findings[-1]["severity"] = severity
+
+        self.console.print(table)
+
+        # Security summary
+        risky_found = [
+            (p, s) for p, s, _, _ in results
+            if s in ("Telnet", "FTP", "Docker", "Redis", "MongoDB",
+                     "Memcached", "Elasticsearch", "VNC", "K8s-API", "SNMP")
+        ]
+        if risky_found:
+            self.console.print("\n[bold yellow]Security Warnings:[/bold yellow]")
+            for port, service in risky_found:
+                self.console.print(f"  [yellow][!][/yellow] Port {port} ({service}) - potentially dangerous if exposed")
+            self.console.print("[dim]Consider restricting access with firewall rules.[/dim]")
 
     # ------------------------------------------------------------------
     # DNS Zone Transfer Testing

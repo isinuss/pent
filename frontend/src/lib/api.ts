@@ -216,6 +216,60 @@ export async function exportScanReport(
   }
 }
 
+// Pipeline
+export interface PipelinePhase {
+  id: string;
+  name: string;
+  description: string;
+  scan_type: string;
+  options: Record<string, unknown>;
+  icon: string;
+  estimated_time: string;
+}
+
+export interface PipelineRecommendation {
+  priority: string;
+  title: string;
+  description: string;
+  action: string;
+}
+
+export interface PipelineStartResponse {
+  pipeline_id: string;
+  scan_ids: Record<string, string>;
+  phases: string[];
+  status: string;
+}
+
+export interface PipelineRecsResponse {
+  recommendations: PipelineRecommendation[];
+  scan_types_completed: string[];
+  missing_phases: PipelinePhase[];
+  total_findings: number;
+}
+
+export async function getPipelinePhases(): Promise<ApiResponse<PipelinePhase[]>> {
+  return request<PipelinePhase[]>('/pipeline/phases');
+}
+
+export async function startPipeline(
+  target: string,
+  phases: string[] = []
+): Promise<ApiResponse<PipelineStartResponse>> {
+  return request<PipelineStartResponse>('/pipeline/start', {
+    method: 'POST',
+    body: JSON.stringify({ target, phases }),
+  });
+}
+
+export async function getPipelineRecommendations(
+  target: string
+): Promise<ApiResponse<PipelineRecsResponse>> {
+  return request<PipelineRecsResponse>(
+    `/pipeline/${encodeURIComponent(target)}/recommendations`
+  );
+}
+
 // Targets
 export async function getTargets(): Promise<ApiResponse<Target[]>> {
   return request<Target[]>('/targets');

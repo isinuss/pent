@@ -254,7 +254,7 @@ class Database:
             findings = conn.execute(
                 "SELECT * FROM findings WHERE scan_id = ? ORDER BY id", (scan_id,)
             ).fetchall()
-            scan["findings"] = [dict(f) for f in findings]
+            scan["findings"] = [self._normalize_finding(dict(f)) for f in findings]
         return scan
 
     def list_scans(self, user_id: int | None = None, limit: int = 100, offset: int = 0) -> list[dict]:
@@ -286,12 +286,73 @@ class Database:
         return results
 
     def get_findings(self, scan_id: str) -> list[dict]:
-        """Get all findings for a scan."""
+        """Get all findings for a scan, normalized for the frontend."""
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM findings WHERE scan_id = ? ORDER BY id", (scan_id,)
             ).fetchall()
-        return [dict(r) for r in rows]
+        return [self._normalize_finding(dict(r)) for r in rows]
+
+    @staticmethod
+    def _normalize_finding(f: dict) -> dict:
+        """Map DB columns to the shape the React frontend expects.
+
+        DB has: title, severity, category, detail, evidence (JSON)
+        Frontend expects: title, severity, category, description, evidence (str), recommendation
+        """
+        # detail -> description
+        f["description"] = f.pop("detail", "") or ""
+
+        # Parse evidence JSON into readable text
+        raw_ev = f.get("evidence") or ""
+        if raw_ev:
+            try:
+                ev = json.loads(raw_ev)
+                if isinstance(ev, dict):
+                    f["evidence"] = "\n".join(f"{k}: {v}" for k, v in ev.items())
+                else:
+                    f["evidence"] = str(ev)
+            except (json.JSONDecodeError, TypeError):
+                f["evidence"] = raw_ev
+        else:
+            f["evidence"] = ""
+
+        # Generate recommendation
+        sev = (f.get("severity") or "info").lower()
+        title = (f.get("title") or "").lower()
+        cat = (f.get("category") or "").lower()
+
+        rec = ""
+        if "missing" in title or "missing" in cat:
+            header_name = f.get("title", "").replace("Missing ", "")
+            rec = f"Add the {header_name} header to your server configuration to improve security posture."
+        elif "cors" in title:
+            rec = "Restrict Access-Control-Allow-Origin to trusted domains only. Avoid using wildcard (*)."
+        elif "cookie" in title or "cookie" in cat:
+            rec = "Set Secure, HttpOnly, and SameSite attributes on all session cookies."
+        elif "ssl" in cat or "tls" in title:
+            rec = "Disable deprecated TLS versions (1.0, 1.1) and enable TLS 1.2+ with strong cipher suites."
+        elif "xss" in title:
+            rec = "Implement Content-Security-Policy, sanitize user input, and encode output."
+        elif "sql" in title:
+            rec = "Use parameterized queries / prepared statements. Never concatenate user input into SQL."
+        elif "redirect" in title:
+            rec = "Validate redirect URLs against an allowlist. Never redirect to user-supplied URLs directly."
+        elif "info_disclosure" in cat or "disclosure" in title:
+            rec = "Remove version information from server headers. Configure your web server to hide Server/X-Powered-By."
+        elif "port" in cat:
+            rec = "Close unnecessary ports. Use firewall rules to restrict access to essential services only."
+        elif "takeover" in cat or "takeover" in title:
+            rec = "Remove dangling DNS records pointing to deprovisioned services."
+        elif sev in ("critical", "high"):
+            rec = "This is a high-severity finding. Investigate and remediate as soon as possible."
+        elif sev == "medium":
+            rec = "Review this finding and apply the appropriate fix based on your environment."
+        else:
+            rec = "Informational finding. Review and address if applicable to your security posture."
+
+        f["recommendation"] = rec
+        return f
 
     def save_findings(self, scan_id: str, findings: list[dict]):
         """Persist a list of finding dicts from a scan module.

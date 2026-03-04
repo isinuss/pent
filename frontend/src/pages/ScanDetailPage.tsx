@@ -203,13 +203,13 @@ export default function ScanDetailPage() {
     return findings
       .filter((f) => {
         if (severityFilter !== 'all' && f.severity !== severityFilter) return false;
-        if (
-          searchQuery &&
-          !f.title.toLowerCase().includes(searchQuery.toLowerCase()) &&
-          !f.description.toLowerCase().includes(searchQuery.toLowerCase()) &&
-          !f.category.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-          return false;
+        if (searchQuery) {
+          const q = searchQuery.toLowerCase();
+          const title = (f.title || '').toLowerCase();
+          const desc = (f.description || '').toLowerCase();
+          const cat = (f.category || '').toLowerCase();
+          if (!title.includes(q) && !desc.includes(q) && !cat.includes(q)) return false;
+        }
         return true;
       })
       .sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);

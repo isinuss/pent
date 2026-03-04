@@ -749,6 +749,288 @@ def api_v1_delete_auth_profile(profile_id):
     return _ok({"deleted": True})
 
 
+# ------------------------------------------------------------------
+# Pipeline endpoints  (require auth)
+# ------------------------------------------------------------------
+
+# Pipeline definition: ordered phases for target testing
+PIPELINE_PHASES = [
+    {
+        "id": "recon",
+        "name": "Reconnaissance",
+        "description": "DNS enumeration, subdomain discovery, WHOIS, SSL/TLS analysis, technology detection, port scanning, WAF detection",
+        "scan_type": "recon",
+        "options": {"passive": False},
+        "icon": "search",
+        "estimated_time": "2-5 min",
+    },
+    {
+        "id": "vuln_scan",
+        "name": "Vulnerability Scanning",
+        "description": "Port service enumeration, SSL/TLS vulnerability checks, HTTP security checks, sensitive path discovery",
+        "scan_type": "vuln_scan",
+        "options": {"quick": True},
+        "icon": "shield",
+        "estimated_time": "3-8 min",
+    },
+    {
+        "id": "web_test",
+        "name": "Web Application Testing",
+        "description": "Form discovery, XSS reflection checks, SQL injection patterns, CSRF detection, directory traversal, secret detection",
+        "scan_type": "web_test",
+        "options": {"full": True},
+        "icon": "globe",
+        "estimated_time": "5-15 min",
+    },
+    {
+        "id": "js_analyze",
+        "name": "JavaScript Analysis",
+        "description": "JS file discovery, endpoint extraction, API key/secret detection, cloud URL enumeration",
+        "scan_type": "js_analyze",
+        "options": {},
+        "icon": "code",
+        "estimated_time": "2-5 min",
+    },
+    {
+        "id": "checks",
+        "name": "Security Checks",
+        "description": "Exposed .env/.git, directory listing, debug endpoints, default credentials, information disclosure",
+        "scan_type": "checks",
+        "options": {},
+        "icon": "check-circle",
+        "estimated_time": "1-3 min",
+    },
+    {
+        "id": "takeover",
+        "name": "Subdomain Takeover",
+        "description": "Check discovered subdomains against 18+ service fingerprints for potential takeover vulnerabilities",
+        "scan_type": "takeover",
+        "options": {},
+        "icon": "alert-triangle",
+        "estimated_time": "2-5 min",
+    },
+]
+
+
+def _generate_recommendations(findings: list[dict]) -> list[dict]:
+    """Analyze findings and generate next-step recommendations."""
+    recs = []
+    severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    categories = set()
+
+    for f in findings:
+        sev = (f.get("severity") or "info").lower()
+        severity_counts[sev] = severity_counts.get(sev, 0) + 1
+        cat = (f.get("category") or "").lower()
+        categories.add(cat)
+
+    # Priority recommendations based on findings
+    if severity_counts["critical"] > 0:
+        recs.append({
+            "priority": "critical",
+            "title": "Critical Findings Detected",
+            "description": f"{severity_counts['critical']} critical finding(s) require immediate attention. Review and remediate before proceeding.",
+            "action": "Review critical findings in the Results page",
+        })
+
+    if severity_counts["high"] > 0:
+        recs.append({
+            "priority": "high",
+            "title": "High-Severity Issues Found",
+            "description": f"{severity_counts['high']} high-severity finding(s). These should be addressed in the near term.",
+            "action": "Prioritize high-severity findings for remediation",
+        })
+
+    if any(c in categories for c in ("port", "open_port")):
+        recs.append({
+            "priority": "medium",
+            "title": "Open Ports Detected",
+            "description": "Review exposed services and ensure only necessary ports are open. Consider firewall rules.",
+            "action": "Run a deeper vulnerability scan on exposed services",
+        })
+
+    if any(c in categories for c in ("missing_header", "header")):
+        recs.append({
+            "priority": "medium",
+            "title": "Security Headers Missing",
+            "description": "Missing security headers can expose the application to XSS, clickjacking, and other attacks.",
+            "action": "Configure CSP, HSTS, X-Frame-Options, and other security headers",
+        })
+
+    if any("cors" in (f.get("title") or "").lower() for f in findings):
+        recs.append({
+            "priority": "high",
+            "title": "CORS Misconfiguration",
+            "description": "Overly permissive CORS policy can allow unauthorized cross-origin requests.",
+            "action": "Restrict Access-Control-Allow-Origin to trusted domains",
+        })
+
+    if any("takeover" in (f.get("category") or "").lower() for f in findings):
+        recs.append({
+            "priority": "high",
+            "title": "Subdomain Takeover Risk",
+            "description": "Dangling DNS records could allow attackers to claim your subdomains.",
+            "action": "Remove unused DNS records or provision the services they point to",
+        })
+
+    if not recs:
+        recs.append({
+            "priority": "info",
+            "title": "No Major Issues Found",
+            "description": "The scan completed without finding critical or high-severity issues. Continue monitoring.",
+            "action": "Schedule periodic scans to maintain security posture",
+        })
+
+    return recs
+
+
+@app.route("/api/v1/pipeline/phases", methods=["GET"])
+@rate_limit(limit=100)
+@require_auth()
+def api_v1_pipeline_phases():
+    """Get the pipeline phase definitions."""
+    return _ok(PIPELINE_PHASES)
+
+
+@app.route("/api/v1/pipeline/start", methods=["POST"])
+@rate_limit(limit=100)
+@require_auth(roles=["admin", "tester"])
+def api_v1_pipeline_start():
+    """Start a pipeline: run multiple scan phases for a target sequentially.
+
+    Body: { "target": "...", "phases": ["recon", "vuln_scan", ...] }
+    If phases is empty, runs all phases.
+    """
+    data = request.get_json(silent=True) or {}
+    target = data.get("target", "").strip()
+    phase_ids = data.get("phases", [])
+
+    if not target:
+        return _err("Target is required")
+
+    # If no phases specified, run all
+    all_phase_ids = [p["id"] for p in PIPELINE_PHASES]
+    if not phase_ids:
+        phase_ids = all_phase_ids
+
+    # Validate phase IDs
+    for pid in phase_ids:
+        if pid not in all_phase_ids:
+            return _err(f"Invalid phase: {pid}")
+
+    pipeline_id = str(uuid.uuid4())[:8]
+    user_id = g.current_user["id"]
+
+    # Create scan entries for each phase
+    scan_ids = {}
+    for pid in phase_ids:
+        phase_def = next(p for p in PIPELINE_PHASES if p["id"] == pid)
+        scan_id = str(uuid.uuid4())[:8]
+        scan_ids[pid] = scan_id
+
+        db.create_scan(scan_id, target, phase_def["scan_type"],
+                       phase_def["options"], user_id)
+
+        _scans_cache[scan_id] = {
+            "id": scan_id,
+            "target": target,
+            "scan_type": phase_def["scan_type"],
+            "options": phase_def["options"],
+            "status": "queued",
+            "findings": [],
+            "created_at": datetime.utcnow().isoformat(),
+            "user_id": user_id,
+            "pipeline_id": pipeline_id,
+        }
+
+    # Run phases sequentially in a background thread
+    def run_pipeline():
+        all_findings = []
+        for pid in phase_ids:
+            scan_id = scan_ids[pid]
+            phase_def = next(p for p in PIPELINE_PHASES if p["id"] == pid)
+
+            socketio.emit("pipeline_phase", {
+                "pipeline_id": pipeline_id,
+                "phase_id": pid,
+                "scan_id": scan_id,
+                "status": "running",
+            })
+
+            run_scan_thread(scan_id, phase_def["scan_type"], target,
+                            phase_def["options"])
+
+            # Collect findings from this phase
+            phase_findings = db.get_findings(scan_id)
+            all_findings.extend(phase_findings)
+
+            socketio.emit("pipeline_phase", {
+                "pipeline_id": pipeline_id,
+                "phase_id": pid,
+                "scan_id": scan_id,
+                "status": _scans_cache.get(scan_id, {}).get("status", "completed"),
+                "finding_count": len(phase_findings),
+            })
+
+        # Generate recommendations based on all findings
+        recs = _generate_recommendations(all_findings)
+
+        socketio.emit("pipeline_complete", {
+            "pipeline_id": pipeline_id,
+            "total_findings": len(all_findings),
+            "recommendations": recs,
+            "scan_ids": scan_ids,
+        })
+
+    thread = threading.Thread(target=run_pipeline, daemon=True)
+    thread.start()
+
+    return _ok({
+        "pipeline_id": pipeline_id,
+        "scan_ids": scan_ids,
+        "phases": phase_ids,
+        "status": "running",
+    }), 201
+
+
+@app.route("/api/v1/pipeline/<target_url>/recommendations", methods=["GET"])
+@rate_limit(limit=100)
+@require_auth()
+def api_v1_pipeline_recommendations(target_url):
+    """Get recommendations based on existing scan findings for a target."""
+    # Find all scans for this target
+    user = g.current_user
+    uid = None if user["role"] == "admin" else user["id"]
+    scans_list = db.list_scans(user_id=uid, limit=100)
+
+    target_scans = [s for s in scans_list if s.get("target") == target_url]
+    if not target_scans:
+        return _ok({"recommendations": [], "scan_types_completed": []})
+
+    all_findings = []
+    scan_types_done = set()
+    for s in target_scans:
+        if s.get("status") == "completed":
+            findings = db.get_findings(s["id"])
+            all_findings.extend(findings)
+            scan_types_done.add(s.get("scan_type", ""))
+
+    recs = _generate_recommendations(all_findings)
+
+    # Suggest phases not yet run
+    missing_phases = [
+        p for p in PIPELINE_PHASES
+        if p["scan_type"] not in scan_types_done
+    ]
+
+    return _ok({
+        "recommendations": recs,
+        "scan_types_completed": list(scan_types_done),
+        "missing_phases": missing_phases,
+        "total_findings": len(all_findings),
+    })
+
+
 # ===================================================================
 #  Legacy API routes (for backward compatibility)
 # ===================================================================

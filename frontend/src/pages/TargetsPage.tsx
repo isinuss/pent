@@ -12,6 +12,7 @@ import {
   X,
   Loader2,
   FolderOpen,
+  Workflow,
 } from 'lucide-react';
 import {
   getTargets,
@@ -448,8 +449,15 @@ export default function TargetsPage() {
                                     <Eye className="h-4 w-4" />
                                   </button>
                                   <button
-                                    onClick={() => navigate(`/scan?target=${encodeURIComponent(t.target)}`)}
+                                    onClick={() => navigate(`/pipeline?target=${encodeURIComponent(t.target)}`)}
                                     className="rounded-lg p-1.5 text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent)]/10"
+                                    title="Run Pipeline"
+                                  >
+                                    <Workflow className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => navigate(`/scan?target=${encodeURIComponent(t.target)}`)}
+                                    className="rounded-lg p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
                                     title="Start Scan"
                                   >
                                     <Play className="h-4 w-4" />

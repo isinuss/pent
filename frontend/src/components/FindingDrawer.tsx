@@ -125,13 +125,13 @@ export default function FindingDrawer({ finding, onClose, isOpen }: FindingDrawe
                 <div className="flex items-center justify-between">
                   <dt className="text-[var(--color-text-muted)]">Finding ID</dt>
                   <dd className="font-mono text-xs text-[var(--color-text-secondary)]">
-                    {finding.id.slice(0, 12)}
+                    {String(finding.id).slice(0, 12)}
                   </dd>
                 </div>
                 <div className="flex items-center justify-between">
                   <dt className="text-[var(--color-text-muted)]">Scan ID</dt>
                   <dd className="font-mono text-xs text-[var(--color-text-secondary)]">
-                    {finding.scan_id.slice(0, 12)}
+                    {String(finding.scan_id).slice(0, 12)}
                   </dd>
                 </div>
                 <div className="flex items-center justify-between">
