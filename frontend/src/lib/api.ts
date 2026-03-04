@@ -111,15 +111,17 @@ async function request<T>(
       headers,
     });
 
+    const body = await response.json().catch(() => ({}));
+
     if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({}));
       const errorMessage =
-        errorBody.error || errorBody.message || `Request failed with status ${response.status}`;
+        body.error || body.message || `Request failed with status ${response.status}`;
       return { data: null, error: errorMessage };
     }
 
-    const data = await response.json();
-    return { data: data as T, error: null };
+    // API wraps responses as { data: ..., error: ... } — unwrap the data field
+    const payload = 'data' in body ? body.data : body;
+    return { data: payload as T, error: body.error || null };
   } catch (err) {
     return {
       data: null,
