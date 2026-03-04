@@ -143,56 +143,67 @@ export default function ScanPage() {
 
   if (activeScan) {
     return (
-      <div className="space-y-6">
-        {/* Scan Info Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
-              Scan: {activeScan.target}
-            </h1>
-            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-              Type: {activeScan.scan_type} &middot; ID: {activeScan.id.slice(0, 8)}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
-                activeScan.status === 'running'
-                  ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
-                  : activeScan.status === 'completed'
-                    ? 'bg-[var(--color-severity-low)]/15 text-[var(--color-severity-low)]'
-                    : activeScan.status === 'error'
-                      ? 'bg-[var(--color-severity-critical)]/15 text-[var(--color-severity-critical)]'
-                      : 'bg-[var(--color-severity-info)]/15 text-[var(--color-severity-info)]'
-              }`}
-            >
-              {activeScan.status === 'running' && (
-                <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] animate-pulse" />
-              )}
-              {activeScan.status.charAt(0).toUpperCase() + activeScan.status.slice(1)}
-            </span>
-            <button
-              onClick={() => {
-                setActiveScan(null);
-                setTarget('');
-                setOptions({});
-              }}
-              className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
-            >
-              New Scan
-            </button>
+      <div className="space-y-4">
+        {/* Scan Info Header Card */}
+        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] px-5 py-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-accent)]/10">
+                <Crosshair className="h-5 w-5 text-[var(--color-accent)]" />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold text-[var(--color-text-primary)]">
+                  {activeScan.target}
+                </h1>
+                <div className="flex items-center gap-2 mt-0.5 text-xs text-[var(--color-text-muted)]">
+                  <span className="rounded bg-[var(--color-bg-secondary)] px-1.5 py-0.5 font-mono">
+                    {activeScan.scan_type}
+                  </span>
+                  <span className="text-[var(--color-border)]">&bull;</span>
+                  <span className="font-mono">{activeScan.id.slice(0, 8)}</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+                  activeScan.status === 'running'
+                    ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+                    : activeScan.status === 'completed'
+                      ? 'bg-[var(--color-severity-low)]/15 text-[var(--color-severity-low)]'
+                      : activeScan.status === 'error'
+                        ? 'bg-[var(--color-severity-critical)]/15 text-[var(--color-severity-critical)]'
+                        : 'bg-[var(--color-severity-info)]/15 text-[var(--color-severity-info)]'
+                }`}
+              >
+                {activeScan.status === 'running' && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] animate-pulse" />
+                )}
+                {activeScan.status.charAt(0).toUpperCase() + activeScan.status.slice(1)}
+              </span>
+              <button
+                onClick={() => {
+                  setActiveScan(null);
+                  setTarget('');
+                  setOptions({});
+                }}
+                className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
+              >
+                New Scan
+              </button>
+            </div>
           </div>
         </div>
 
         {/* Terminal + Live Findings Split */}
-        <div className="flex gap-4" style={{ minHeight: '460px' }}>
-          {/* Terminal - 60% */}
-          <div className="w-[60%] min-w-0">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+          {/* Terminal - 3/5 */}
+          <div className="lg:col-span-3 min-w-0">
             <Terminal scanId={activeScan.id} />
           </div>
 
-          {/* Live Findings Feed - 40% */}
-          <div className="w-[40%] min-w-0">
+          {/* Live Findings Feed - 2/5 */}
+          <div className="lg:col-span-2 min-w-0" style={{ minHeight: '460px' }}>
             <LiveFindingsFeed scanId={activeScan.id} />
           </div>
         </div>

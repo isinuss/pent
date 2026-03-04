@@ -79,13 +79,15 @@ export default function LiveFindingsFeed({ scanId }: LiveFindingsFeedProps) {
           className="flex-1 overflow-y-auto"
         >
           {findings.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Radio className="mb-3 h-8 w-8 text-[var(--color-text-muted)] opacity-40" />
-              <p className="text-sm text-[var(--color-text-muted)]">
+            <div className="flex h-full flex-col items-center justify-center py-12 text-center px-6">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--color-accent)]/5 mb-4">
+                <Radio className="h-6 w-6 text-[var(--color-accent)] opacity-50 animate-pulse" />
+              </div>
+              <p className="text-sm font-medium text-[var(--color-text-secondary)]">
                 Waiting for findings...
               </p>
-              <p className="mt-1 text-xs text-[var(--color-text-muted)] opacity-60">
-                Findings will appear here in real time
+              <p className="mt-1.5 text-xs text-[var(--color-text-muted)] leading-relaxed max-w-[200px]">
+                Vulnerabilities discovered during the scan will appear here in real time
               </p>
             </div>
           ) : (

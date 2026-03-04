@@ -116,20 +116,21 @@ export default function Terminal({ scanId }: TerminalProps) {
   }, [scanId, writeLine]);
 
   return (
-    <div className="rounded-lg border border-[var(--color-border)] overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)]">
+    <div className="flex flex-col rounded-lg border border-[var(--color-border)] overflow-hidden" style={{ minHeight: '460px' }}>
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)]">
         <div className="flex gap-1.5">
-          <span className="h-3 w-3 rounded-full bg-[var(--color-severity-critical)] opacity-80" />
-          <span className="h-3 w-3 rounded-full bg-[var(--color-severity-medium)] opacity-80" />
-          <span className="h-3 w-3 rounded-full bg-[var(--color-severity-low)] opacity-80" />
+          <span className="h-2.5 w-2.5 rounded-full bg-[var(--color-severity-critical)] opacity-70" />
+          <span className="h-2.5 w-2.5 rounded-full bg-[var(--color-severity-medium)] opacity-70" />
+          <span className="h-2.5 w-2.5 rounded-full bg-[var(--color-severity-low)] opacity-70" />
         </div>
         <span className="ml-2 text-xs text-[var(--color-text-muted)] font-mono">
-          scan:{scanId.slice(0, 8)}
+          terminal &mdash; scan:{scanId.slice(0, 8)}
         </span>
       </div>
       <div
         ref={containerRef}
-        className="h-[400px] bg-[var(--color-terminal-bg)] p-2"
+        className="flex-1 bg-[var(--color-terminal-bg)] p-2"
+        style={{ minHeight: '420px' }}
       />
     </div>
   );
