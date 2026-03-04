@@ -158,9 +158,9 @@ class WebConsole(Console):
     """
 
     def __init__(self, scan_id: str):
-        self._buffer = StringIO()
+        self._ws_buf = StringIO()
         super().__init__(
-            file=self._buffer,
+            file=self._ws_buf,
             force_terminal=True,
             width=120,
             color_system="truecolor",
@@ -169,10 +169,10 @@ class WebConsole(Console):
         self._finding_count = 0
 
     def print(self, *args, **kwargs):
-        self._buffer.truncate(0)
-        self._buffer.seek(0)
+        self._ws_buf.truncate(0)
+        self._ws_buf.seek(0)
         super().print(*args, **kwargs)
-        text = self._buffer.getvalue()
+        text = self._ws_buf.getvalue()
         if text.strip():
             socketio.emit("scan_output", {
                 "scan_id": self.scan_id,
