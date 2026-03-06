@@ -74,7 +74,7 @@ PENT has a modular scanning engine with 8 modules (recon, vuln scan, web test, J
 
 ---
 
-## Phase 2: Interactive UI + Deeper Scanning (v0.3) — ~40% Complete
+## Phase 2: Interactive UI + Deeper Scanning (v0.3) — ~80% Complete
 
 *Goal: Make the UI truly interactive and expand scan capabilities beyond surface-level checks.*
 
@@ -84,8 +84,8 @@ PENT has a modular scanning engine with 8 modules (recon, vuln scan, web test, J
 - [x] Target management — save targets, group by project/client, track scope
 - [x] Scan configuration builder — visual module picker with toggles and options
 - [x] Dark/light theme toggle (ThemeToggle component)
-- [ ] Interactive recon map — visual graph of subdomains, IPs, DNS records, tech stack
-- [ ] Severity trend charts — line/bar charts showing findings over time per target
+- [x] Interactive recon map — visual force-directed graph of subdomains, IPs, DNS records, tech stack
+- [x] Severity trend charts — stacked area chart showing findings over time per target
 
 ### Testing Pipeline *(new — not in original roadmap)*
 - [x] Automated lateral testing pipeline — run all scan phases sequentially against a target
@@ -107,28 +107,28 @@ PENT has a modular scanning engine with 8 modules (recon, vuln scan, web test, J
 ### Authenticated Testing
 - [x] Auth profile backend — save cookie/header/bearer token/form-based configs
 - [x] Session-aware scanning — apply auth profiles to web testing module
-- [ ] Auth profile management UI — visual config editor in frontend
+- [x] Auth profile management UI — visual config editor in frontend
 - [ ] Login sequence recorder — define form-based login flows visually
 - [ ] Authenticated path discovery and form testing
 
 ### Advanced Web Testing
-- [ ] Blind SQL injection (time-based, boolean-based)
-- [ ] Stored XSS detection via crawl-then-check
+- [x] Blind SQL injection (time-based, boolean-based)
+- [x] Stored XSS detection via crawl-then-check
 - [ ] DOM-based XSS via headless browser (Playwright)
-- [ ] Server-Side Request Forgery (SSRF) checks
-- [ ] HTTP request smuggling detection
-- [ ] WebSocket security testing
+- [x] Server-Side Request Forgery (SSRF) checks
+- [x] HTTP request smuggling detection
+- [x] WebSocket security testing
 
 ### Enhanced Reconnaissance
-- [ ] DNS zone transfer testing
-- [ ] Virtual host discovery
-- [ ] WAF detection and fingerprinting
+- [x] DNS zone transfer testing
+- [x] Virtual host discovery
+- [x] WAF detection and fingerprinting
 
 ### Secret Detection v2
-- [ ] Entropy-based filtering to reduce false positives
-- [ ] Live secret validation (test if detected keys are active)
-- [ ] Expanded patterns: Datadog, New Relic, Cloudflare, DigitalOcean, Mapbox
-- [ ] Source map parsing for deeper JS analysis
+- [x] Entropy-based filtering to reduce false positives
+- [x] Live secret validation (test if detected keys are active)
+- [x] Expanded patterns: Datadog, New Relic, Cloudflare, DigitalOcean, Mapbox
+- [x] Source map parsing for deeper JS analysis
 
 ---
 
@@ -307,7 +307,7 @@ These are explicitly out of scope:
 | Version | Phase | Status | UI Focus | CLI Focus |
 |---------|-------|--------|----------|-----------|
 | v0.2 | Foundation | **~85%** | React SPA, dashboard, live terminal | Server auth, JSON output |
-| v0.3 | Deeper Testing | **~40%** | Pipeline, findings drawer, auth profiles | Advanced scan flags, async scanning |
+| v0.3 | Deeper Testing | **~80%** | Pipeline, findings drawer, auth profiles, trend charts, recon map | Advanced scan flags, async scanning |
 | v0.4 | Team Platform | Planned | Collaboration, annotations, integrations | Proxy routing, API testing commands |
 | v0.5 | Automation | Planned | Scan scheduler, visual check builder, dashboards | Profiles, cron, compliance reports |
 | v1.0 | Platform | Planned | Plugin marketplace, branded reports | CI/CD actions, SARIF, plugin CLI |

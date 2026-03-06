@@ -7,6 +7,7 @@ import {
   Clock,
   ChevronDown,
   ChevronRight,
+  Map,
 } from 'lucide-react';
 import SeverityBadge from '../components/SeverityBadge';
 import FindingDrawer from '../components/FindingDrawer';
@@ -316,8 +317,17 @@ export default function ScanDetailPage() {
             </div>
           </div>
 
-          {/* Export Buttons */}
+          {/* Export & Recon Map Buttons */}
           <div className="flex items-center gap-2">
+            {scan.scan_type === 'recon' && (
+              <button
+                onClick={() => navigate(`/recon-map/${scan.id}`)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-3 py-1.5 text-xs font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent)]/20"
+              >
+                <Map className="h-3.5 w-3.5" />
+                Recon Map
+              </button>
+            )}
             {(['md', 'html', 'json'] as const).map((format) => (
               <button
                 key={format}

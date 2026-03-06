@@ -21,8 +21,10 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
+  AreaChart,
+  Area,
 } from 'recharts';
-import { getStats, type Stats, type ScanSummary } from '../lib/api';
+import { getStats, getFindingTrends, type Stats, type ScanSummary, type TrendPoint } from '../lib/api';
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -91,6 +93,7 @@ const SEVERITY_COLORS: Record<string, string> = {
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [stats, setStats] = useState<Stats | null>(null);
+  const [trends, setTrends] = useState<TrendPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -98,13 +101,19 @@ export default function DashboardPage() {
     let cancelled = false;
 
     async function load() {
-      const result = await getStats();
+      const [statsResult, trendsResult] = await Promise.all([
+        getStats(),
+        getFindingTrends(30),
+      ]);
       if (cancelled) return;
 
-      if (result.error) {
-        setError(result.error);
-      } else if (result.data) {
-        setStats(result.data);
+      if (statsResult.error) {
+        setError(statsResult.error);
+      } else if (statsResult.data) {
+        setStats(statsResult.data);
+      }
+      if (trendsResult.data) {
+        setTrends(trendsResult.data);
       }
       setLoading(false);
     }
@@ -300,6 +309,83 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* Severity Trend Chart */}
+      {trends.length > 1 && (
+        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] p-5">
+          <h2 className="mb-4 text-sm font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide">
+            Finding Trends (Last 30 Days)
+          </h2>
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={trends}>
+                <defs>
+                  <linearGradient id="gradCritical" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gradHigh" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gradMedium" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#eab308" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#eab308" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gradLow" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#2a3a52" />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fill: '#94a3b8', fontSize: 11 }}
+                  axisLine={{ stroke: '#2a3a52' }}
+                  tickLine={false}
+                  tickFormatter={(val: string) => {
+                    const d = new Date(val);
+                    return `${d.getMonth() + 1}/${d.getDate()}`;
+                  }}
+                />
+                <YAxis
+                  tick={{ fill: '#94a3b8', fontSize: 11 }}
+                  axisLine={{ stroke: '#2a3a52' }}
+                  tickLine={false}
+                  allowDecimals={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#1a2233',
+                    border: '1px solid #2a3a52',
+                    borderRadius: '8px',
+                    color: '#e2e8f0',
+                    fontSize: '12px',
+                  }}
+                  labelFormatter={(label: string) => {
+                    return new Date(label).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    });
+                  }}
+                />
+                <Legend
+                  formatter={(value: string) => (
+                    <span style={{ color: '#94a3b8', fontSize: '12px' }}>
+                      {value.charAt(0).toUpperCase() + value.slice(1)}
+                    </span>
+                  )}
+                />
+                <Area type="monotone" dataKey="critical" stroke="#ef4444" fill="url(#gradCritical)" strokeWidth={2} />
+                <Area type="monotone" dataKey="high" stroke="#f97316" fill="url(#gradHigh)" strokeWidth={2} />
+                <Area type="monotone" dataKey="medium" stroke="#eab308" fill="url(#gradMedium)" strokeWidth={1.5} />
+                <Area type="monotone" dataKey="low" stroke="#22c55e" fill="url(#gradLow)" strokeWidth={1.5} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       {/* Recent Scans */}
       <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)]">

@@ -628,6 +628,117 @@ def api_v1_stats():
     return _ok(stats)
 
 
+@app.route("/api/v1/stats/trends", methods=["GET"])
+@rate_limit(limit=100)
+@require_auth()
+def api_v1_finding_trends():
+    """Get findings grouped by date and severity for trend charts."""
+    user = g.current_user
+    days = request.args.get("days", 30, type=int)
+    days = min(max(days, 7), 365)  # clamp to 7-365
+    uid = None if user["role"] == "admin" else user["id"]
+    return _ok(db.get_finding_trends(user_id=uid, days=days))
+
+
+@app.route("/api/v1/scans/<scan_id>/recon-data", methods=["GET"])
+@rate_limit(limit=100)
+@require_auth()
+def api_v1_scan_recon_data(scan_id):
+    """Get recon findings structured for the interactive recon map."""
+    scan = db.get_scan(scan_id)
+    if scan is None:
+        return _err("Scan not found", 404)
+
+    findings = scan.get("findings", [])
+    nodes = []
+    edges = []
+    node_id = 0
+
+    # Central target node
+    target_node = {"id": "target", "label": scan["target"], "type": "target", "group": "target"}
+    nodes.append(target_node)
+
+    # Categorize findings into graph nodes
+    seen = set()
+    for f in findings:
+        cat = (f.get("category") or "").lower()
+        title = f.get("title") or ""
+        desc = f.get("description") or ""
+        sev = (f.get("severity") or "info").lower()
+
+        # DNS records
+        if "dns" in cat or "dns" in title.lower():
+            label = title.replace("DNS ", "").strip()
+            key = f"dns-{label}"
+            if key not in seen:
+                seen.add(key)
+                node_id += 1
+                nodes.append({"id": f"n{node_id}", "label": label, "type": "dns", "group": "dns", "severity": sev, "detail": desc})
+                edges.append({"source": "target", "target": f"n{node_id}", "label": "DNS"})
+
+        # Subdomains
+        elif "subdomain" in cat or "subdomain" in title.lower():
+            label = desc or title
+            key = f"sub-{label}"
+            if key not in seen:
+                seen.add(key)
+                node_id += 1
+                nodes.append({"id": f"n{node_id}", "label": label, "type": "subdomain", "group": "subdomain", "severity": sev, "detail": desc})
+                edges.append({"source": "target", "target": f"n{node_id}", "label": "subdomain"})
+
+        # Technology
+        elif "tech" in cat or "technology" in title.lower() or "server" in title.lower() or "powered" in title.lower():
+            label = desc or title
+            key = f"tech-{label}"
+            if key not in seen:
+                seen.add(key)
+                node_id += 1
+                nodes.append({"id": f"n{node_id}", "label": label, "type": "tech", "group": "tech", "severity": sev, "detail": desc})
+                edges.append({"source": "target", "target": f"n{node_id}", "label": "tech"})
+
+        # Ports
+        elif "port" in cat:
+            label = title
+            key = f"port-{label}"
+            if key not in seen:
+                seen.add(key)
+                node_id += 1
+                nodes.append({"id": f"n{node_id}", "label": label, "type": "port", "group": "port", "severity": sev, "detail": desc})
+                edges.append({"source": "target", "target": f"n{node_id}", "label": "port"})
+
+        # SSL/TLS
+        elif "ssl" in cat or "tls" in cat or "certificate" in title.lower():
+            label = title
+            key = f"ssl-{label}"
+            if key not in seen:
+                seen.add(key)
+                node_id += 1
+                nodes.append({"id": f"n{node_id}", "label": label, "type": "ssl", "group": "ssl", "severity": sev, "detail": desc})
+                edges.append({"source": "target", "target": f"n{node_id}", "label": "SSL/TLS"})
+
+        # Headers
+        elif "header" in cat or "header" in title.lower():
+            label = title
+            key = f"hdr-{label}"
+            if key not in seen:
+                seen.add(key)
+                node_id += 1
+                nodes.append({"id": f"n{node_id}", "label": label, "type": "header", "group": "header", "severity": sev, "detail": desc})
+                edges.append({"source": "target", "target": f"n{node_id}", "label": "header"})
+
+        # WAF
+        elif "waf" in cat or "waf" in title.lower():
+            label = desc or title
+            key = f"waf-{label}"
+            if key not in seen:
+                seen.add(key)
+                node_id += 1
+                nodes.append({"id": f"n{node_id}", "label": label, "type": "waf", "group": "waf", "severity": sev, "detail": desc})
+                edges.append({"source": "target", "target": f"n{node_id}", "label": "WAF"})
+
+    return _ok({"nodes": nodes, "edges": edges, "target": scan["target"]})
+
+
 # ------------------------------------------------------------------
 # API Key management  (require auth)
 # ------------------------------------------------------------------

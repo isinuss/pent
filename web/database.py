@@ -533,6 +533,37 @@ class Database:
     # Statistics
     # ------------------------------------------------------------------
 
+    def get_finding_trends(self, user_id: int | None = None, days: int = 30) -> list[dict]:
+        """Return findings grouped by date and severity for trend charts."""
+        with self._connect() as conn:
+            where = ""
+            params: list = []
+            if user_id is not None:
+                where = "AND s.user_id = ?"
+                params.append(user_id)
+            params.append(days)
+
+            rows = conn.execute(
+                f"SELECT date(f.created_at) AS date, f.severity, COUNT(*) AS count "
+                f"FROM findings f JOIN scans s ON f.scan_id = s.id "
+                f"WHERE f.created_at >= datetime('now', '-' || ? || ' days') {where} "
+                f"GROUP BY date(f.created_at), f.severity "
+                f"ORDER BY date(f.created_at)",
+                params[::-1],  # user_id first if present, then days
+            ).fetchall()
+
+        # Build a dict keyed by date
+        trend_map: dict[str, dict] = {}
+        for r in rows:
+            d = r["date"]
+            if d not in trend_map:
+                trend_map[d] = {"date": d, "critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+            sev = (r["severity"] or "info").lower()
+            if sev in trend_map[d]:
+                trend_map[d][sev] = r["count"]
+
+        return sorted(trend_map.values(), key=lambda x: x["date"])
+
     def get_stats(self, user_id: int | None = None) -> dict:
         """Return aggregate stats. If user_id is given, scope to that user."""
         with self._connect() as conn:

@@ -11,6 +11,7 @@ import {
   Shield,
   Target,
   Workflow,
+  KeyRound,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import ThemeToggle from './ThemeToggle';
@@ -19,6 +20,7 @@ const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/targets', icon: Target, label: 'Targets' },
   { to: '/pipeline', icon: Workflow, label: 'Pipeline' },
+  { to: '/auth-profiles', icon: KeyRound, label: 'Auth Profiles' },
   { to: '/scan', icon: Crosshair, label: 'New Scan' },
   { to: '/results', icon: List, label: 'Results' },
   { to: '/guides', icon: BookOpen, label: 'Guides' },

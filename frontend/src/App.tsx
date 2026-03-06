@@ -10,6 +10,8 @@ import GuidesPage from './pages/GuidesPage';
 import GuideDetailPage from './pages/GuideDetailPage';
 import TargetsPage from './pages/TargetsPage';
 import PipelinePage from './pages/PipelinePage';
+import AuthProfilesPage from './pages/AuthProfilesPage';
+import ReconMapPage from './pages/ReconMapPage';
 
 function ProtectedRoute() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -58,6 +60,8 @@ export default function App() {
               <Route path="/results" element={<ResultsPage />} />
               <Route path="/results/:id" element={<ScanDetailPage />} />
               <Route path="/pipeline" element={<PipelinePage />} />
+              <Route path="/auth-profiles" element={<AuthProfilesPage />} />
+              <Route path="/recon-map/:scanId" element={<ReconMapPage />} />
               <Route path="/guides" element={<GuidesPage />} />
               <Route path="/guides/:topic" element={<GuideDetailPage />} />
             </Route>

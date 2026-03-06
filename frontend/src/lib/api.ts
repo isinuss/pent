@@ -270,6 +270,77 @@ export async function getPipelineRecommendations(
   );
 }
 
+// Auth Profiles
+export interface AuthProfile {
+  id: number;
+  name: string;
+  profile_type: 'bearer' | 'cookie' | 'header' | 'form';
+  config: Record<string, unknown>;
+  target_id: string | null;
+  created_at: string;
+}
+
+export async function getAuthProfiles(): Promise<ApiResponse<AuthProfile[]>> {
+  return request<AuthProfile[]>('/auth-profiles');
+}
+
+export async function createAuthProfile(data: {
+  name: string;
+  profile_type: string;
+  config: Record<string, unknown>;
+  target_id?: string;
+}): Promise<ApiResponse<AuthProfile>> {
+  return request<AuthProfile>('/auth-profiles', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteAuthProfile(id: number): Promise<ApiResponse<void>> {
+  return request<void>(`/auth-profiles/${id}`, { method: 'DELETE' });
+}
+
+// Trends
+export interface TrendPoint {
+  date: string;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  info: number;
+}
+
+export async function getFindingTrends(days?: number): Promise<ApiResponse<TrendPoint[]>> {
+  const q = days ? `?days=${days}` : '';
+  return request<TrendPoint[]>(`/stats/trends${q}`);
+}
+
+// Recon Map
+export interface ReconNode {
+  id: string;
+  label: string;
+  type: string;
+  group: string;
+  severity?: string;
+  detail?: string;
+}
+
+export interface ReconEdge {
+  source: string;
+  target: string;
+  label: string;
+}
+
+export interface ReconMapData {
+  nodes: ReconNode[];
+  edges: ReconEdge[];
+  target: string;
+}
+
+export async function getReconData(scanId: string): Promise<ApiResponse<ReconMapData>> {
+  return request<ReconMapData>(`/scans/${scanId}/recon-data`);
+}
+
 // Targets
 export async function getTargets(): Promise<ApiResponse<Target[]>> {
   return request<Target[]>('/targets');
